@@ -37,10 +37,23 @@ def init_session_state():
         "current_session_id": None,
         "session_name": "",
         "saved_sessions": [],
+        "page": "main",
     }
     for key, val in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = val
+
+    # Recover auth session from cached supabase client after page refresh
+    if st.session_state.user is None:
+        try:
+            supabase = get_supabase()
+            session = supabase.auth.get_session()
+            if session:
+                st.session_state.user = session.user
+                st.session_state.access_token = session.access_token
+                st.session_state.refresh_token = session.refresh_token
+        except Exception:
+            pass
 
 
 def login(email: str, password: str):
@@ -260,61 +273,9 @@ def main_app():
             save_session(session_name)
             st.rerun()
     with c3:
-        show_history = st.toggle("History", value=False)
-
-    # ── Session History ──────────────────────────────────────────────
-    if show_history:
-        fetch_sessions()
-        sessions = st.session_state.saved_sessions
-
-        search = st.text_input("Search by trader name or session...", key="trader_search")
-        if search:
-            search_lower = search.lower()
-            sessions = [
-                s for s in sessions
-                if search_lower in s.get("session_name", "").lower()
-                or any(search_lower in p.get("traderName", "").lower() for p in s.get("purchases", []))
-                or any(search_lower in sl.get("traderName", "").lower() for sl in s.get("sales", []))
-            ]
-
-        if not sessions:
-            st.info("No saved sessions found" if not search else f'No sessions found for "{search}"')
-        else:
-            for sess in sessions:
-                with st.container(border=True):
-                    h1, h2 = st.columns([5, 2])
-                    with h1:
-                        st.markdown(f"**{sess['session_name']}**")
-                        sellers = set(p.get("traderName", "") for p in sess.get("purchases", []))
-                        buyers = set(s.get("traderName", "") for s in sess.get("sales", []))
-                        if sellers:
-                            st.caption(f"Sellers: {', '.join(sellers)}")
-                        if buyers:
-                            st.caption(f"Buyers: {', '.join(buyers)}")
-                    with h2:
-                        st.caption(sess.get("created_at", "")[:10])
-
-                    m1, m2, m3 = st.columns(3)
-                    m1.metric("Purchase", f"₹{sess['total_purchase_amount']:.2f}")
-                    m2.metric("Sale", f"₹{sess['total_sale_amount']:.2f}")
-                    profit = sess["net_profit"]
-                    m3.metric(
-                        "Profit" if profit >= 0 else "Loss",
-                        f"₹{abs(profit):.2f}",
-                        delta=f"{'+'if profit>=0 else ''}{profit:.2f}",
-                    )
-
-                    b1, b2 = st.columns(2)
-                    with b1:
-                        if st.button("Load", key=f"load_{sess['id']}", use_container_width=True):
-                            load_session(sess)
-                            st.rerun()
-                    with b2:
-                        if st.button("Delete", key=f"del_{sess['id']}", use_container_width=True, type="secondary"):
-                            delete_session(sess["id"])
-                            st.rerun()
-
-        st.divider()
+        if st.button("📋 History", use_container_width=True):
+            st.session_state.page = "history"
+            st.rerun()
 
     # ── Summary Dashboard ────────────────────────────────────────────
     purchases = st.session_state.purchases
@@ -636,11 +597,86 @@ def main_app():
             st.rerun()
 
 
+# ── History Page ──────────────────────────────────────────────────────
+def history_page():
+    user = st.session_state.user
+
+    # Header with back button
+    col_back, col_title, col_user, col_logout = st.columns([1, 4, 3, 1])
+    with col_back:
+        if st.button("← Back", use_container_width=True):
+            st.session_state.page = "main"
+            st.rerun()
+    with col_title:
+        st.markdown("# 📋 Session History")
+    with col_user:
+        st.caption(f"Logged in as **{user.email}**")
+    with col_logout:
+        if st.button("Logout", key="hist_logout"):
+            logout()
+            st.rerun()
+
+    st.divider()
+
+    fetch_sessions()
+    sessions = st.session_state.saved_sessions
+
+    search = st.text_input("Search by trader name or session...", key="trader_search")
+    if search:
+        search_lower = search.lower()
+        sessions = [
+            s for s in sessions
+            if search_lower in s.get("session_name", "").lower()
+            or any(search_lower in p.get("traderName", "").lower() for p in s.get("purchases", []))
+            or any(search_lower in sl.get("traderName", "").lower() for sl in s.get("sales", []))
+        ]
+
+    if not sessions:
+        st.info("No saved sessions found" if not search else f'No sessions found for "{search}"')
+    else:
+        for sess in sessions:
+            with st.container(border=True):
+                h1, h2 = st.columns([5, 2])
+                with h1:
+                    st.markdown(f"**{sess['session_name']}**")
+                    sellers = set(p.get("traderName", "") for p in sess.get("purchases", []))
+                    buyers = set(s.get("traderName", "") for s in sess.get("sales", []))
+                    if sellers:
+                        st.caption(f"Sellers: {', '.join(sellers)}")
+                    if buyers:
+                        st.caption(f"Buyers: {', '.join(buyers)}")
+                with h2:
+                    st.caption(sess.get("created_at", "")[:10])
+
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Purchase", f"₹{sess['total_purchase_amount']:.2f}")
+                m2.metric("Sale", f"₹{sess['total_sale_amount']:.2f}")
+                profit = sess["net_profit"]
+                m3.metric(
+                    "Profit" if profit >= 0 else "Loss",
+                    f"₹{abs(profit):.2f}",
+                    delta=f"{'+'if profit>=0 else ''}{profit:.2f}",
+                )
+
+                b1, b2 = st.columns(2)
+                with b1:
+                    if st.button("Load", key=f"load_{sess['id']}", use_container_width=True):
+                        load_session(sess)
+                        st.session_state.page = "main"
+                        st.rerun()
+                with b2:
+                    if st.button("Delete", key=f"del_{sess['id']}", use_container_width=True, type="secondary"):
+                        delete_session(sess["id"])
+                        st.rerun()
+
+
 # ── Main ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Chilli Trade Tracker", page_icon="🌶️", layout="wide")
 init_session_state()
 
 if st.session_state.user is None:
     auth_page()
+elif st.session_state.page == "history":
+    history_page()
 else:
     main_app()
