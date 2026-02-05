@@ -15,6 +15,7 @@ interface ChilliEntry {
 
 interface TradeRecord {
   id: string;
+  date: string; // Trade date (YYYY-MM-DD)
   traderName: string;
   entries: ChilliEntry[];
   totalBags: number;
@@ -37,6 +38,11 @@ const parseWeightToQuintals = (weight: number): number => {
   const quintals = Math.floor(weight / 100);
   const kgs = weight % 100;
   return quintals + (kgs / 100);
+};
+
+// Get today's date in YYYY-MM-DD format
+const getTodayDate = (): string => {
+  return new Date().toISOString().split('T')[0];
 };
 
 // Session timeout (10 minutes = 600000 ms)
@@ -65,6 +71,7 @@ function App() {
   const [editPurchaseAmount, setEditPurchaseAmount] = useState('');
   const [purchaseBardhanRate, setPurchaseBardhanRate] = useState(DEFAULT_BARDHAN_RATE.toString());
   const [purchaseSearch, setPurchaseSearch] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState(getTodayDate());
 
   // Sales state
   const [sales, setSales] = useState<TradeRecord[]>([]);
@@ -77,6 +84,7 @@ function App() {
   const [saleBardhanRate, setSaleBardhanRate] = useState(DEFAULT_BARDHAN_RATE.toString());
   const [saleKantaRate, setSaleKantaRate] = useState(DEFAULT_KANTA_RATE.toString());
   const [saleSearch, setSaleSearch] = useState('');
+  const [saleDate, setSaleDate] = useState(getTodayDate());
 
   // Session timeout tracking
   const [lastActivity, setLastActivity] = useState(Date.now());
@@ -245,6 +253,7 @@ function App() {
 
     const newRecord: TradeRecord = {
       id: Date.now().toString(),
+      date: purchaseDate,
       traderName: purchaseTrader || 'Unknown Seller',
       entries: [...purchaseEntries],
       totalBags,
@@ -261,6 +270,7 @@ function App() {
     setPurchaseEntries([]);
     setPurchasePayment('');
     setPurchaseBardhanRate(DEFAULT_BARDHAN_RATE.toString());
+    setPurchaseDate(getTodayDate());
   };
 
   // Save sale record
@@ -282,6 +292,7 @@ function App() {
 
     const newRecord: TradeRecord = {
       id: Date.now().toString(),
+      date: saleDate,
       traderName: saleTrader || 'Unknown Buyer',
       entries: [...saleEntries],
       totalBags,
@@ -301,6 +312,7 @@ function App() {
     setSalePayment('');
     setSaleBardhanRate(DEFAULT_BARDHAN_RATE.toString());
     setSaleKantaRate(DEFAULT_KANTA_RATE.toString());
+    setSaleDate(getTodayDate());
   };
 
   // Delete records
@@ -443,6 +455,7 @@ function App() {
     // Add default values for new fields if they don't exist in old data
     const loadedPurchases = (session.purchases || []).map(p => ({
       ...p,
+      date: p.date || getTodayDate(),
       amountPaid: p.amountPaid || 0,
       amountReceived: p.amountReceived || 0,
       bardhanRate: p.bardhanRate || DEFAULT_BARDHAN_RATE,
@@ -450,6 +463,7 @@ function App() {
     }));
     const loadedSales = (session.sales || []).map(s => ({
       ...s,
+      date: s.date || getTodayDate(),
       amountPaid: s.amountPaid || 0,
       amountReceived: s.amountReceived || 0,
       bardhanRate: s.bardhanRate || DEFAULT_BARDHAN_RATE,
@@ -487,6 +501,8 @@ function App() {
     setSaleKantaRate(DEFAULT_KANTA_RATE.toString());
     setPurchaseSearch('');
     setSaleSearch('');
+    setPurchaseDate(getTodayDate());
+    setSaleDate(getTodayDate());
   };
 
   // Inventory tracking - bags purchased vs sold
@@ -728,6 +744,14 @@ function App() {
                   placeholder="Enter seller name"
                 />
               </label>
+              <label>
+                Date:
+                <input
+                  type="date"
+                  value={purchaseDate}
+                  onChange={(e) => setPurchaseDate(e.target.value)}
+                />
+              </label>
             </div>
 
             {/* Add Entry Form */}
@@ -881,6 +905,7 @@ function App() {
                   <div key={record.id} className="record-card">
                     <div className="record-header">
                       <span className="trader-name">{record.traderName}</span>
+                      <span className="record-date">{record.date}</span>
                       <button onClick={() => handleDeletePurchase(record.id)} className="delete-btn small">×</button>
                     </div>
                     <div className="record-details">
@@ -955,6 +980,14 @@ function App() {
                   value={saleTrader}
                   onChange={(e) => setSaleTrader(e.target.value)}
                   placeholder="Enter buyer name"
+                />
+              </label>
+              <label>
+                Date:
+                <input
+                  type="date"
+                  value={saleDate}
+                  onChange={(e) => setSaleDate(e.target.value)}
                 />
               </label>
             </div>
@@ -1124,6 +1157,7 @@ function App() {
                   <div key={record.id} className="record-card sale">
                     <div className="record-header">
                       <span className="trader-name">{record.traderName}</span>
+                      <span className="record-date">{record.date}</span>
                       <button onClick={() => handleDeleteSale(record.id)} className="delete-btn small">×</button>
                     </div>
                     <div className="record-details">

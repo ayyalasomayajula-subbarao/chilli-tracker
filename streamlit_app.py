@@ -156,12 +156,15 @@ def load_session(session):
     purchases = session.get("purchases", [])
     sales = session.get("sales", [])
     # Add defaults for old data
+    today = str(datetime.now().date())
     for p in purchases:
+        p.setdefault("date", today)
         p.setdefault("amountPaid", 0)
         p.setdefault("amountReceived", 0)
         p.setdefault("bardhanRate", DEFAULT_BARDHAN_RATE)
         p.setdefault("bardhanAmount", 0)
     for s in sales:
+        s.setdefault("date", today)
         s.setdefault("amountPaid", 0)
         s.setdefault("amountReceived", 0)
         s.setdefault("bardhanRate", DEFAULT_BARDHAN_RATE)
@@ -370,7 +373,12 @@ def main_app():
 
     # ── PURCHASE TAB ─────────────────────────────────────────────────
     with tab_purchase:
-        purchase_trader = st.text_input("Seller Name", key="purchase_trader_input", placeholder="Enter seller name")
+        pt1, pt2 = st.columns([3, 1])
+        with pt1:
+            purchase_trader = st.text_input("Seller Name", key="purchase_trader_input", placeholder="Enter seller name")
+        with pt2:
+            from datetime import date as date_type
+            purchase_date = st.date_input("Date", value=date_type.today(), key="purchase_date")
 
         st.markdown("**Add Entry**")
         with st.form("purchase_entry_form", clear_on_submit=True):
@@ -433,6 +441,7 @@ def main_app():
             if st.button("Save Purchase", type="primary", key="save_purchase"):
                 record = {
                     "id": str(uuid.uuid4()),
+                    "date": str(purchase_date),
                     "traderName": purchase_trader or "Unknown Seller",
                     "entries": p_entries.copy(),
                     "totalBags": total_bags,
@@ -460,7 +469,7 @@ def main_app():
                 if p_search and p_search.lower() not in rec.get("traderName", "").lower():
                     continue
                 with st.container(border=True):
-                    st.markdown(f"**{rec['traderName']}**")
+                    st.markdown(f"**{rec['traderName']}** &nbsp; `{rec.get('date', '')}`")
                     st.write(
                         f"Bags: {rec['totalBags']} | Weight: {rec['totalWeightInQuintals']:.3f} Q | "
                         f"Amount: ₹{rec['totalAmount']:.2f}"
@@ -486,7 +495,11 @@ def main_app():
 
     # ── SALE TAB ─────────────────────────────────────────────────────
     with tab_sale:
-        sale_trader = st.text_input("Buyer Name", key="sale_trader_input", placeholder="Enter buyer name")
+        st1, st2 = st.columns([3, 1])
+        with st1:
+            sale_trader = st.text_input("Buyer Name", key="sale_trader_input", placeholder="Enter buyer name")
+        with st2:
+            sale_date = st.date_input("Date", value=date_type.today(), key="sale_date")
 
         st.markdown("**Add Entry**")
         with st.form("sale_entry_form", clear_on_submit=True):
@@ -555,6 +568,7 @@ def main_app():
             if st.button("Save Sale", type="primary", key="save_sale"):
                 record = {
                     "id": str(uuid.uuid4()),
+                    "date": str(sale_date),
                     "traderName": sale_trader or "Unknown Buyer",
                     "entries": s_entries.copy(),
                     "totalBags": total_bags_s,
@@ -584,7 +598,7 @@ def main_app():
                 if s_search and s_search.lower() not in rec.get("traderName", "").lower():
                     continue
                 with st.container(border=True):
-                    st.markdown(f"**{rec['traderName']}**")
+                    st.markdown(f"**{rec['traderName']}** &nbsp; `{rec.get('date', '')}`")
                     st.write(
                         f"Bags: {rec['totalBags']} | Weight: {rec['totalWeightInQuintals']:.3f} Q | "
                         f"Amount: ₹{rec['totalAmount']:.2f}"

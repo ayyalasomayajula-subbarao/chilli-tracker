@@ -20,6 +20,7 @@ export interface DbTradeSession {
 
 export interface DbTradeRecord {
   id: string;
+  date?: string; // Trade date (YYYY-MM-DD)
   traderName: string;
   entries: DbChilliEntry[];
   totalBags: number;
