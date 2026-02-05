@@ -64,6 +64,7 @@ function App() {
   const [editingPurchasePayment, setEditingPurchasePayment] = useState<string | null>(null);
   const [editPurchaseAmount, setEditPurchaseAmount] = useState('');
   const [purchaseBardhanRate, setPurchaseBardhanRate] = useState(DEFAULT_BARDHAN_RATE.toString());
+  const [purchaseSearch, setPurchaseSearch] = useState('');
 
   // Sales state
   const [sales, setSales] = useState<TradeRecord[]>([]);
@@ -75,6 +76,7 @@ function App() {
   const [editSaleAmount, setEditSaleAmount] = useState('');
   const [saleBardhanRate, setSaleBardhanRate] = useState(DEFAULT_BARDHAN_RATE.toString());
   const [saleKantaRate, setSaleKantaRate] = useState(DEFAULT_KANTA_RATE.toString());
+  const [saleSearch, setSaleSearch] = useState('');
 
   // Session timeout tracking
   const [lastActivity, setLastActivity] = useState(Date.now());
@@ -350,10 +352,15 @@ function App() {
   const currentPurchaseBags = purchaseEntries.reduce((sum, e) => sum + e.bags, 0);
   const currentPurchaseWeight = purchaseEntries.reduce((sum, e) => sum + e.weightInQuintals, 0);
   const currentPurchaseAmount = purchaseEntries.reduce((sum, e) => sum + e.totalAmount, 0);
+  const currentPurchaseBardhan = currentPurchaseBags * (parseFloat(purchaseBardhanRate) || DEFAULT_BARDHAN_RATE);
+  const currentPurchaseTotal = currentPurchaseAmount + currentPurchaseBardhan;
 
   const currentSaleBags = saleEntries.reduce((sum, e) => sum + e.bags, 0);
   const currentSaleWeight = saleEntries.reduce((sum, e) => sum + e.weightInQuintals, 0);
   const currentSaleAmount = saleEntries.reduce((sum, e) => sum + e.totalAmount, 0);
+  const currentSaleBardhan = currentSaleBags * (parseFloat(saleBardhanRate) || DEFAULT_BARDHAN_RATE);
+  const currentSaleKanta = currentSaleBags * (parseFloat(saleKantaRate) || DEFAULT_KANTA_RATE);
+  const currentSaleTotal = currentSaleAmount + currentSaleBardhan + currentSaleKanta;
 
   // Overall totals
   const totalPurchaseAmount = purchases.reduce((sum, p) => sum + p.totalAmount, 0);
@@ -478,6 +485,8 @@ function App() {
     setPurchaseBardhanRate(DEFAULT_BARDHAN_RATE.toString());
     setSaleBardhanRate(DEFAULT_BARDHAN_RATE.toString());
     setSaleKantaRate(DEFAULT_KANTA_RATE.toString());
+    setPurchaseSearch('');
+    setSaleSearch('');
   };
 
   // Inventory tracking - bags purchased vs sold
@@ -493,6 +502,15 @@ function App() {
   const totalAmountToReceive = sales.reduce((sum, s) => sum + s.totalAmount, 0);
   const totalAmountReceived = sales.reduce((sum, s) => sum + (s.amountReceived || 0), 0);
   const pendingReceivable = totalAmountToReceive - totalAmountReceived;
+
+  // Filter current session's purchases and sales by trader search
+  const filteredPurchases = purchaseSearch
+    ? purchases.filter(p => p.traderName.toLowerCase().includes(purchaseSearch.toLowerCase()))
+    : purchases;
+
+  const filteredSales = saleSearch
+    ? sales.filter(s => s.traderName.toLowerCase().includes(saleSearch.toLowerCase()))
+    : sales;
 
   // Filter sessions by trader search
   const filteredSessions = traderSearch
@@ -796,6 +814,27 @@ function App() {
                   </tfoot>
                 </table>
 
+                {/* Bardhan Charges */}
+                <div className="charges-section">
+                  <div className="charge-row">
+                    <label>
+                      Bardhan (₹/bag):
+                      <input
+                        type="number"
+                        value={purchaseBardhanRate}
+                        onChange={(e) => setPurchaseBardhanRate(e.target.value)}
+                        step="0.5"
+                      />
+                    </label>
+                    <span className="charge-calc">
+                      {currentPurchaseBags} bags × ₹{(parseFloat(purchaseBardhanRate) || DEFAULT_BARDHAN_RATE)} = <strong>₹{currentPurchaseBardhan.toFixed(2)}</strong>
+                    </span>
+                  </div>
+                  <div className="charges-total">
+                    Entries: ₹{currentPurchaseAmount.toFixed(2)} + Bardhan: ₹{currentPurchaseBardhan.toFixed(2)} = <strong>Grand Total: ₹{currentPurchaseTotal.toFixed(2)}</strong>
+                  </div>
+                </div>
+
                 {/* Payment Input */}
                 <div className="payment-input-section">
                   <label>
@@ -809,8 +848,8 @@ function App() {
                     />
                   </label>
                   <span className="payment-hint">
-                    Total: ₹{currentPurchaseAmount.toFixed(2)} |
-                    Pending: ₹{(currentPurchaseAmount - (parseFloat(purchasePayment) || 0)).toFixed(2)}
+                    Total: ₹{currentPurchaseTotal.toFixed(2)} |
+                    Pending: ₹{(currentPurchaseTotal - (parseFloat(purchasePayment) || 0)).toFixed(2)}
                   </span>
                 </div>
 
@@ -824,7 +863,21 @@ function App() {
             {purchases.length > 0 && (
               <div className="saved-records">
                 <h3>Saved Purchases</h3>
-                {purchases.map((record) => (
+                <div className="search-box">
+                  <input
+                    type="text"
+                    value={purchaseSearch}
+                    onChange={(e) => setPurchaseSearch(e.target.value)}
+                    placeholder="Search seller name..."
+                    className="search-input"
+                  />
+                  {purchaseSearch && (
+                    <button onClick={() => setPurchaseSearch('')} className="clear-search">×</button>
+                  )}
+                </div>
+                {filteredPurchases.length === 0 ? (
+                  <p className="no-sessions">No purchases found for "{purchaseSearch}"</p>
+                ) : filteredPurchases.map((record) => (
                   <div key={record.id} className="record-card">
                     <div className="record-header">
                       <span className="trader-name">{record.traderName}</span>
@@ -834,6 +887,9 @@ function App() {
                       <span>Bags: {record.totalBags}</span>
                       <span>Weight: {record.totalWeightInQuintals.toFixed(3)} Q</span>
                       <span className="record-amount">₹{record.totalAmount.toFixed(2)}</span>
+                    </div>
+                    <div className="record-charges">
+                      <span>Bardhan: ₹{(record.bardhanAmount || 0).toFixed(2)} (@₹{record.bardhanRate}/bag)</span>
                     </div>
                     <div className="record-payment">
                       <span className="paid">Paid: ₹{(record.amountPaid || 0).toFixed(2)}</span>
@@ -987,6 +1043,41 @@ function App() {
                   </tfoot>
                 </table>
 
+                {/* Bardhan & Kanta Charges */}
+                <div className="charges-section sale">
+                  <div className="charge-row">
+                    <label>
+                      Bardhan (₹/bag):
+                      <input
+                        type="number"
+                        value={saleBardhanRate}
+                        onChange={(e) => setSaleBardhanRate(e.target.value)}
+                        step="0.5"
+                      />
+                    </label>
+                    <span className="charge-calc">
+                      {currentSaleBags} bags × ₹{(parseFloat(saleBardhanRate) || DEFAULT_BARDHAN_RATE)} = <strong>₹{currentSaleBardhan.toFixed(2)}</strong>
+                    </span>
+                  </div>
+                  <div className="charge-row">
+                    <label>
+                      Kanta (₹/bag):
+                      <input
+                        type="number"
+                        value={saleKantaRate}
+                        onChange={(e) => setSaleKantaRate(e.target.value)}
+                        step="0.5"
+                      />
+                    </label>
+                    <span className="charge-calc">
+                      {currentSaleBags} bags × ₹{(parseFloat(saleKantaRate) || DEFAULT_KANTA_RATE)} = <strong>₹{currentSaleKanta.toFixed(2)}</strong>
+                    </span>
+                  </div>
+                  <div className="charges-total">
+                    Entries: ₹{currentSaleAmount.toFixed(2)} + Bardhan: ₹{currentSaleBardhan.toFixed(2)} + Kanta: ₹{currentSaleKanta.toFixed(2)} = <strong>Grand Total: ₹{currentSaleTotal.toFixed(2)}</strong>
+                  </div>
+                </div>
+
                 {/* Payment Input */}
                 <div className="payment-input-section">
                   <label>
@@ -1000,8 +1091,8 @@ function App() {
                     />
                   </label>
                   <span className="payment-hint">
-                    Total: ₹{currentSaleAmount.toFixed(2)} |
-                    Pending: ₹{(currentSaleAmount - (parseFloat(salePayment) || 0)).toFixed(2)}
+                    Total: ₹{currentSaleTotal.toFixed(2)} |
+                    Pending: ₹{(currentSaleTotal - (parseFloat(salePayment) || 0)).toFixed(2)}
                   </span>
                 </div>
 
@@ -1015,7 +1106,21 @@ function App() {
             {sales.length > 0 && (
               <div className="saved-records">
                 <h3>Saved Sales</h3>
-                {sales.map((record) => (
+                <div className="search-box">
+                  <input
+                    type="text"
+                    value={saleSearch}
+                    onChange={(e) => setSaleSearch(e.target.value)}
+                    placeholder="Search buyer name..."
+                    className="search-input"
+                  />
+                  {saleSearch && (
+                    <button onClick={() => setSaleSearch('')} className="clear-search">×</button>
+                  )}
+                </div>
+                {filteredSales.length === 0 ? (
+                  <p className="no-sessions">No sales found for "{saleSearch}"</p>
+                ) : filteredSales.map((record) => (
                   <div key={record.id} className="record-card sale">
                     <div className="record-header">
                       <span className="trader-name">{record.traderName}</span>
@@ -1025,6 +1130,10 @@ function App() {
                       <span>Bags: {record.totalBags}</span>
                       <span>Weight: {record.totalWeightInQuintals.toFixed(3)} Q</span>
                       <span className="record-amount">₹{record.totalAmount.toFixed(2)}</span>
+                    </div>
+                    <div className="record-charges">
+                      <span>Bardhan: ₹{(record.bardhanAmount || 0).toFixed(2)} (@₹{record.bardhanRate}/bag)</span>
+                      <span>Kanta: ₹{(record.kantaAmount || 0).toFixed(2)} (@₹{record.kantaRate}/bag)</span>
                     </div>
                     <div className="record-payment">
                       <span className="received">Received: ₹{(record.amountReceived || 0).toFixed(2)}</span>

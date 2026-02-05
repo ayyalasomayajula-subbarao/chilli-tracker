@@ -450,7 +450,15 @@ def main_app():
         # Saved purchases
         if purchases:
             st.markdown("### Saved Purchases")
+            p_search = st.text_input("Search seller name...", key="purchase_search")
+            display_purchases = purchases
+            if p_search:
+                display_purchases = [p for p in purchases if p_search.lower() in p.get("traderName", "").lower()]
+            if not display_purchases:
+                st.info(f'No purchases found for "{p_search}"')
             for idx, rec in enumerate(purchases):
+                if p_search and p_search.lower() not in rec.get("traderName", "").lower():
+                    continue
                 with st.container(border=True):
                     st.markdown(f"**{rec['traderName']}**")
                     st.write(
@@ -566,7 +574,15 @@ def main_app():
         # Saved sales
         if sales:
             st.markdown("### Saved Sales")
+            s_search = st.text_input("Search buyer name...", key="sale_search")
+            display_sales = sales
+            if s_search:
+                display_sales = [s for s in sales if s_search.lower() in s.get("traderName", "").lower()]
+            if not display_sales:
+                st.info(f'No sales found for "{s_search}"')
             for idx, rec in enumerate(sales):
+                if s_search and s_search.lower() not in rec.get("traderName", "").lower():
+                    continue
                 with st.container(border=True):
                     st.markdown(f"**{rec['traderName']}**")
                     st.write(
