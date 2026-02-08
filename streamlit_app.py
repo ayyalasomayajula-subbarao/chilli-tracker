@@ -7,7 +7,8 @@ from supabase import create_client, Client
 SUPABASE_URL = "https://fokfznfepgdvqgfopqir.supabase.co"
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZva2Z6bmZlcGdkdnFnZm9wcWlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAxMjUwMTIsImV4cCI6MjA4NTcwMTAxMn0.ruTx9KWUu9RlNbIo2JZPkG0CR7zX_-CE6kFJ0Lo3X3g"
 
-DEFAULT_BARDHAN_RATE = 28.0
+DEFAULT_BARDHAN_RATE_SELLER = 25.0  # For purchases (buying from sellers)
+DEFAULT_BARDHAN_RATE_BUYER = 28.0   # For sales (selling to buyers)
 DEFAULT_KANTA_RATE = 7.5
 
 
@@ -182,14 +183,14 @@ def load_session(session):
         p.setdefault("date", today)
         p.setdefault("amountPaid", 0)
         p.setdefault("amountReceived", 0)
-        p.setdefault("bardhanRate", DEFAULT_BARDHAN_RATE)
+        p.setdefault("bardhanRate", DEFAULT_BARDHAN_RATE_SELLER)
         p.setdefault("bardhanAmount", 0)
         p.setdefault("linkedSales", [])  # Track which sales this purchase was sold to
     for s in sales:
         s.setdefault("date", today)
         s.setdefault("amountPaid", 0)
         s.setdefault("amountReceived", 0)
-        s.setdefault("bardhanRate", DEFAULT_BARDHAN_RATE)
+        s.setdefault("bardhanRate", DEFAULT_BARDHAN_RATE_BUYER)
         s.setdefault("bardhanAmount", 0)
         s.setdefault("kantaRate", DEFAULT_KANTA_RATE)
         s.setdefault("kantaAmount", 0)
@@ -345,8 +346,8 @@ def get_trader_records(trader_name: str, trader_type: str):
     return records
 
 
-def update_specific_record(session_id: str, record_id: str, trader_type: str, field: str, value: float):
-    """Update a specific field in a specific record."""
+def update_specific_record(session_id: str, record_id: str, trader_type: str, field: str, value):
+    """Update a specific field in a specific record. Value can be string, int, or float."""
     supabase = get_supabase()
     sessions = st.session_state.saved_sessions
 
@@ -621,7 +622,7 @@ def main_app():
                     st.rerun()
 
             st.markdown("**Charges**")
-            bardhan_rate = st.number_input("Bardhan (₹/bag)", value=DEFAULT_BARDHAN_RATE, step=0.5, key="p_bardhan")
+            bardhan_rate = st.number_input("Bardhan (₹/bag)", value=DEFAULT_BARDHAN_RATE_SELLER, step=0.5, key="p_bardhan")
             bardhan_amt = total_bags * bardhan_rate
             grand_total = entries_amount + bardhan_amt
             st.info(f"Bardhan: {total_bags} bags × ₹{bardhan_rate} = **₹{bardhan_amt:.2f}** | Grand Total: **₹{grand_total:.2f}**")
@@ -671,7 +672,7 @@ def main_app():
                         f"Amount: ₹{rec['totalAmount']:.2f}"
                     )
                     st.caption(
-                        f"Bardhan: ₹{rec.get('bardhanAmount', 0):.2f} (@₹{rec.get('bardhanRate', DEFAULT_BARDHAN_RATE)}/bag)"
+                        f"Bardhan: ₹{rec.get('bardhanAmount', 0):.2f} (@₹{rec.get('bardhanRate', DEFAULT_BARDHAN_RATE_SELLER)}/bag)"
                     )
                     paid = rec.get("amountPaid", 0)
                     pending = rec["totalAmount"] - paid
@@ -775,7 +776,7 @@ def main_app():
             st.markdown("**Charges**")
             ch1, ch2 = st.columns(2)
             with ch1:
-                s_bardhan_rate = st.number_input("Bardhan (₹/bag)", value=DEFAULT_BARDHAN_RATE, step=0.5, key="s_bardhan")
+                s_bardhan_rate = st.number_input("Bardhan (₹/bag)", value=DEFAULT_BARDHAN_RATE_BUYER, step=0.5, key="s_bardhan")
             with ch2:
                 s_kanta_rate = st.number_input("Kanta (₹/bag)", value=DEFAULT_KANTA_RATE, step=0.5, key="s_kanta")
 
@@ -837,7 +838,7 @@ def main_app():
                         f"Amount: ₹{rec['totalAmount']:.2f}"
                     )
                     st.caption(
-                        f"Bardhan: ₹{rec.get('bardhanAmount', 0):.2f} (@₹{rec.get('bardhanRate', DEFAULT_BARDHAN_RATE)}/bag) | "
+                        f"Bardhan: ₹{rec.get('bardhanAmount', 0):.2f} (@₹{rec.get('bardhanRate', DEFAULT_BARDHAN_RATE_BUYER)}/bag) | "
                         f"Kanta: ₹{rec.get('kantaAmount', 0):.2f} (@₹{rec.get('kantaRate', DEFAULT_KANTA_RATE)}/bag)"
                     )
                     received = rec.get("amountReceived", 0)
@@ -973,26 +974,56 @@ def main_app():
                             records = get_trader_records(name, "seller")
                             if records:
                                 for i, rec in enumerate(records):
-                                    st.markdown(f"**{rec['session_name']}** - {rec['date']}")
-                                    rc1, rc2, rc3 = st.columns([2, 2, 2])
-                                    with rc1:
-                                        st.write(f"Bags: {rec['bags']}")
-                                        st.write(f"Amount: ₹{rec['amount']:.2f}")
-                                    with rc2:
-                                        st.write(f"Paid: :green[₹{rec['paid']:.2f}]")
-                                        st.write(f"Pending: :orange[₹{rec['pending']:.2f}]")
-                                    with rc3:
-                                        new_paid_str = st.text_input("Set paid to", key=f"sel_{name}_{i}", placeholder="₹")
-                                        if st.button("Update", key=f"selbtn_{name}_{i}"):
-                                            if new_paid_str.strip():
-                                                try:
-                                                    new_paid = float(new_paid_str)
-                                                    if update_specific_record(rec['session_id'], rec['record_id'], "seller", "amountPaid", new_paid):
-                                                        st.success("Updated!")
-                                                        fetch_sessions()
-                                                        st.rerun()
-                                                except ValueError:
-                                                    st.error("Invalid number")
+                                    st.markdown(f"**{rec['session_name']}**")
+                                    # Current values display
+                                    st.caption(f"Current: Date: {rec['date']} | Bags: {rec['bags']} | Amount: ₹{rec['amount']:.2f} | Paid: ₹{rec['paid']:.2f} | Pending: ₹{rec['pending']:.2f}")
+
+                                    # Edit fields
+                                    ec1, ec2, ec3, ec4 = st.columns(4)
+                                    with ec1:
+                                        new_date = st.text_input("Date", value=rec['date'], key=f"sel_date_{name}_{i}")
+                                    with ec2:
+                                        new_bags_str = st.text_input("Bags", key=f"sel_bags_{name}_{i}", placeholder=str(rec['bags']))
+                                    with ec3:
+                                        new_amt_str = st.text_input("Amount (₹)", key=f"sel_amt_{name}_{i}", placeholder=f"{rec['amount']:.2f}")
+                                    with ec4:
+                                        new_paid_str = st.text_input("Paid (₹)", key=f"sel_paid_{name}_{i}", placeholder=f"{rec['paid']:.2f}")
+
+                                    if st.button("Update Record", key=f"selbtn_{name}_{i}", type="primary"):
+                                        updates_made = False
+                                        # Update date if changed
+                                        if new_date and new_date != rec['date']:
+                                            if update_specific_record(rec['session_id'], rec['record_id'], "seller", "date", new_date):
+                                                updates_made = True
+                                        # Update bags if provided
+                                        if new_bags_str.strip():
+                                            try:
+                                                new_bags = int(new_bags_str)
+                                                if update_specific_record(rec['session_id'], rec['record_id'], "seller", "totalBags", new_bags):
+                                                    updates_made = True
+                                            except ValueError:
+                                                st.error("Invalid bags number")
+                                        # Update amount if provided
+                                        if new_amt_str.strip():
+                                            try:
+                                                new_amt = float(new_amt_str)
+                                                if update_specific_record(rec['session_id'], rec['record_id'], "seller", "totalAmount", new_amt):
+                                                    updates_made = True
+                                            except ValueError:
+                                                st.error("Invalid amount")
+                                        # Update paid if provided
+                                        if new_paid_str.strip():
+                                            try:
+                                                new_paid = float(new_paid_str)
+                                                if update_specific_record(rec['session_id'], rec['record_id'], "seller", "amountPaid", new_paid):
+                                                    updates_made = True
+                                            except ValueError:
+                                                st.error("Invalid paid amount")
+
+                                        if updates_made:
+                                            st.success("Updated!")
+                                            fetch_sessions()
+                                            st.rerun()
                                     st.divider()
 
     # ── BUYERS TAB ────────────────────────────────────────────────────
@@ -1050,26 +1081,56 @@ def main_app():
                             records = get_trader_records(name, "buyer")
                             if records:
                                 for i, rec in enumerate(records):
-                                    st.markdown(f"**{rec['session_name']}** - {rec['date']}")
-                                    rc1, rc2, rc3 = st.columns([2, 2, 2])
-                                    with rc1:
-                                        st.write(f"Bags: {rec['bags']}")
-                                        st.write(f"Amount: ₹{rec['amount']:.2f}")
-                                    with rc2:
-                                        st.write(f"Received: :green[₹{rec['received']:.2f}]")
-                                        st.write(f"Pending: :orange[₹{rec['pending']:.2f}]")
-                                    with rc3:
-                                        new_received_str = st.text_input("Set received to", key=f"buy_{name}_{i}", placeholder="₹")
-                                        if st.button("Update", key=f"buybtn_{name}_{i}"):
-                                            if new_received_str.strip():
-                                                try:
-                                                    new_received = float(new_received_str)
-                                                    if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "amountReceived", new_received):
-                                                        st.success("Updated!")
-                                                        fetch_sessions()
-                                                        st.rerun()
-                                                except ValueError:
-                                                    st.error("Invalid number")
+                                    st.markdown(f"**{rec['session_name']}**")
+                                    # Current values display
+                                    st.caption(f"Current: Date: {rec['date']} | Bags: {rec['bags']} | Amount: ₹{rec['amount']:.2f} | Received: ₹{rec['received']:.2f} | Pending: ₹{rec['pending']:.2f}")
+
+                                    # Edit fields
+                                    ec1, ec2, ec3, ec4 = st.columns(4)
+                                    with ec1:
+                                        new_date = st.text_input("Date", value=rec['date'], key=f"buy_date_{name}_{i}")
+                                    with ec2:
+                                        new_bags_str = st.text_input("Bags", key=f"buy_bags_{name}_{i}", placeholder=str(rec['bags']))
+                                    with ec3:
+                                        new_amt_str = st.text_input("Amount (₹)", key=f"buy_amt_{name}_{i}", placeholder=f"{rec['amount']:.2f}")
+                                    with ec4:
+                                        new_received_str = st.text_input("Received (₹)", key=f"buy_rcv_{name}_{i}", placeholder=f"{rec['received']:.2f}")
+
+                                    if st.button("Update Record", key=f"buybtn_{name}_{i}", type="primary"):
+                                        updates_made = False
+                                        # Update date if changed
+                                        if new_date and new_date != rec['date']:
+                                            if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "date", new_date):
+                                                updates_made = True
+                                        # Update bags if provided
+                                        if new_bags_str.strip():
+                                            try:
+                                                new_bags = int(new_bags_str)
+                                                if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "totalBags", new_bags):
+                                                    updates_made = True
+                                            except ValueError:
+                                                st.error("Invalid bags number")
+                                        # Update amount if provided
+                                        if new_amt_str.strip():
+                                            try:
+                                                new_amt = float(new_amt_str)
+                                                if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "totalAmount", new_amt):
+                                                    updates_made = True
+                                            except ValueError:
+                                                st.error("Invalid amount")
+                                        # Update received if provided
+                                        if new_received_str.strip():
+                                            try:
+                                                new_received = float(new_received_str)
+                                                if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "amountReceived", new_received):
+                                                    updates_made = True
+                                            except ValueError:
+                                                st.error("Invalid received amount")
+
+                                        if updates_made:
+                                            st.success("Updated!")
+                                            fetch_sessions()
+                                            st.rerun()
                                     st.divider()
 
     st.divider()
