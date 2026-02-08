@@ -257,6 +257,119 @@ def rename_trader_in_all_sessions(old_name: str, new_name: str, trader_type: str
     return updated_count
 
 
+def update_trader_payment(trader_name: str, trader_type: str, add_amount: float = 0, set_amount: float = None):
+    """Update payment for a trader across all sessions. Returns number of sessions updated."""
+    supabase = get_supabase()
+    sessions = st.session_state.saved_sessions
+
+    updated_count = 0
+    remaining_to_add = add_amount
+
+    for sess in sessions:
+        modified = False
+        if trader_type == "seller":
+            for p in sess.get("purchases", []):
+                if p.get("traderName", "").lower() == trader_name.lower():
+                    if set_amount is not None:
+                        p["amountPaid"] = set_amount
+                        modified = True
+                    elif remaining_to_add > 0:
+                        current_paid = p.get("amountPaid", 0)
+                        pending = p.get("totalAmount", 0) - current_paid
+                        if pending > 0:
+                            to_add = min(remaining_to_add, pending)
+                            p["amountPaid"] = current_paid + to_add
+                            remaining_to_add -= to_add
+                            modified = True
+        else:  # buyer
+            for s in sess.get("sales", []):
+                if s.get("traderName", "").lower() == trader_name.lower():
+                    if set_amount is not None:
+                        s["amountReceived"] = set_amount
+                        modified = True
+                    elif remaining_to_add > 0:
+                        current_received = s.get("amountReceived", 0)
+                        pending = s.get("totalAmount", 0) - current_received
+                        if pending > 0:
+                            to_add = min(remaining_to_add, pending)
+                            s["amountReceived"] = current_received + to_add
+                            remaining_to_add -= to_add
+                            modified = True
+
+        if modified:
+            try:
+                supabase.table("trade_sessions").update({
+                    "purchases": sess.get("purchases", []),
+                    "sales": sess.get("sales", []),
+                }).eq("id", sess["id"]).execute()
+                updated_count += 1
+            except Exception as e:
+                st.error(f"Error updating session {sess['session_name']}: {e}")
+
+    return updated_count
+
+
+def get_trader_records(trader_name: str, trader_type: str):
+    """Get all records for a specific trader across sessions."""
+    sessions = st.session_state.saved_sessions
+    records = []
+
+    for sess in sessions:
+        if trader_type == "seller":
+            for p in sess.get("purchases", []):
+                if p.get("traderName", "").lower() == trader_name.lower():
+                    records.append({
+                        "session_id": sess["id"],
+                        "session_name": sess["session_name"],
+                        "record_id": p.get("id"),
+                        "date": p.get("date", ""),
+                        "bags": p.get("totalBags", 0),
+                        "amount": p.get("totalAmount", 0),
+                        "paid": p.get("amountPaid", 0),
+                        "pending": p.get("totalAmount", 0) - p.get("amountPaid", 0),
+                    })
+        else:  # buyer
+            for s in sess.get("sales", []):
+                if s.get("traderName", "").lower() == trader_name.lower():
+                    records.append({
+                        "session_id": sess["id"],
+                        "session_name": sess["session_name"],
+                        "record_id": s.get("id"),
+                        "date": s.get("date", ""),
+                        "bags": s.get("totalBags", 0),
+                        "amount": s.get("totalAmount", 0),
+                        "received": s.get("amountReceived", 0),
+                        "pending": s.get("totalAmount", 0) - s.get("amountReceived", 0),
+                    })
+
+    return records
+
+
+def update_specific_record(session_id: str, record_id: str, trader_type: str, field: str, value: float):
+    """Update a specific field in a specific record."""
+    supabase = get_supabase()
+    sessions = st.session_state.saved_sessions
+
+    for sess in sessions:
+        if sess["id"] != session_id:
+            continue
+
+        records = sess.get("purchases" if trader_type == "seller" else "sales", [])
+        for rec in records:
+            if rec.get("id") == record_id:
+                rec[field] = value
+                try:
+                    supabase.table("trade_sessions").update({
+                        "purchases": sess.get("purchases", []),
+                        "sales": sess.get("sales", []),
+                    }).eq("id", sess["id"]).execute()
+                    return True
+                except Exception as e:
+                    st.error(f"Error updating: {e}")
+                    return False
+    return False
+
+
 def get_aggregate_stats(sessions):
     """Calculate aggregate stats from all sessions."""
     total_purchase = 0
@@ -452,13 +565,27 @@ def main_app():
         with st.form("purchase_entry_form", clear_on_submit=True):
             ec1, ec2, ec3, ec4 = st.columns([1, 1.5, 1.5, 1])
             with ec1:
-                p_bags = st.number_input("Bags", min_value=0, step=1, key="p_bags")
+                p_bags_str = st.text_input("Bags", key="p_bags", placeholder="e.g. 5")
             with ec2:
-                p_weight = st.number_input("Weight (528.5=5Q+28.5Kg)", min_value=0.0, step=0.1, key="p_weight", format="%.1f")
+                p_weight_str = st.text_input("Weight", key="p_weight", placeholder="528.5=5Q+28.5Kg")
             with ec3:
-                p_rate = st.number_input("Rate/Q (₹)", min_value=0.0, step=0.01, key="p_rate", format="%.2f")
+                p_rate_str = st.text_input("Rate/Q (₹)", key="p_rate", placeholder="e.g. 15000")
             with ec4:
                 add_entry = st.form_submit_button("+ Add")
+
+            # Parse inputs
+            try:
+                p_bags = int(p_bags_str) if p_bags_str.strip() else 0
+            except ValueError:
+                p_bags = 0
+            try:
+                p_weight = float(p_weight_str) if p_weight_str.strip() else 0.0
+            except ValueError:
+                p_weight = 0.0
+            try:
+                p_rate = float(p_rate_str) if p_rate_str.strip() else 0.0
+            except ValueError:
+                p_rate = 0.0
 
             if add_entry and p_bags > 0 and p_weight > 0 and p_rate > 0:
                 wq = parse_weight_to_quintals(p_weight)
@@ -499,7 +626,11 @@ def main_app():
             grand_total = entries_amount + bardhan_amt
             st.info(f"Bardhan: {total_bags} bags × ₹{bardhan_rate} = **₹{bardhan_amt:.2f}** | Grand Total: **₹{grand_total:.2f}**")
 
-            payment = st.number_input("Amount Paid to Seller (₹)", value=0.0, step=0.01, key="p_payment", format="%.2f")
+            payment_str = st.text_input("Amount Paid to Seller (₹)", key="p_payment", placeholder="Enter amount paid")
+            try:
+                payment = float(payment_str) if payment_str.strip() else 0.0
+            except ValueError:
+                payment = 0.0
             st.caption(f"Total: ₹{grand_total:.2f} | Pending: ₹{(grand_total - payment):.2f}")
 
             if st.button("Save Purchase", type="primary", key="save_purchase"):
@@ -548,11 +679,16 @@ def main_app():
 
                     uc1, uc2, uc3 = st.columns(3)
                     with uc1:
-                        add_amt = st.number_input("Amount", min_value=0.0, step=0.01, key=f"padd_{idx}", format="%.2f")
+                        add_amt_str = st.text_input("Amount", key=f"padd_{idx}", placeholder="₹")
+                        try:
+                            add_amt = float(add_amt_str) if add_amt_str.strip() else 0.0
+                        except ValueError:
+                            add_amt = 0.0
                     with uc2:
                         if st.button("+ Add Payment", key=f"paddbt_{idx}"):
-                            st.session_state.purchases[idx]["amountPaid"] = paid + add_amt
-                            st.rerun()
+                            if add_amt > 0:
+                                st.session_state.purchases[idx]["amountPaid"] = paid + add_amt
+                                st.rerun()
                     with uc3:
                         if st.button("Delete", key=f"pdel_{idx}"):
                             st.session_state.purchases.pop(idx)
@@ -581,13 +717,27 @@ def main_app():
         with st.form("sale_entry_form", clear_on_submit=True):
             sc1, sc2, sc3, sc4 = st.columns([1, 1.5, 1.5, 1])
             with sc1:
-                s_bags = st.number_input("Bags", min_value=0, step=1, key="s_bags")
+                s_bags_str = st.text_input("Bags", key="s_bags", placeholder="e.g. 5")
             with sc2:
-                s_weight = st.number_input("Weight (528.5=5Q+28.5Kg)", min_value=0.0, step=0.1, key="s_weight", format="%.1f")
+                s_weight_str = st.text_input("Weight", key="s_weight", placeholder="528.5=5Q+28.5Kg")
             with sc3:
-                s_rate = st.number_input("Rate/Q (₹)", min_value=0.0, step=0.01, key="s_rate", format="%.2f")
+                s_rate_str = st.text_input("Rate/Q (₹)", key="s_rate", placeholder="e.g. 16000")
             with sc4:
                 add_s_entry = st.form_submit_button("+ Add")
+
+            # Parse inputs
+            try:
+                s_bags = int(s_bags_str) if s_bags_str.strip() else 0
+            except ValueError:
+                s_bags = 0
+            try:
+                s_weight = float(s_weight_str) if s_weight_str.strip() else 0.0
+            except ValueError:
+                s_weight = 0.0
+            try:
+                s_rate = float(s_rate_str) if s_rate_str.strip() else 0.0
+            except ValueError:
+                s_rate = 0.0
 
             if add_s_entry and s_bags > 0 and s_weight > 0 and s_rate > 0:
                 wq = parse_weight_to_quintals(s_weight)
@@ -637,7 +787,11 @@ def main_app():
                 f"Grand Total: **₹{s_grand_total:.2f}**"
             )
 
-            s_payment = st.number_input("Amount Received from Buyer (₹)", value=0.0, step=0.01, key="s_payment", format="%.2f")
+            s_payment_str = st.text_input("Amount Received from Buyer (₹)", key="s_payment", placeholder="Enter amount received")
+            try:
+                s_payment = float(s_payment_str) if s_payment_str.strip() else 0.0
+            except ValueError:
+                s_payment = 0.0
             st.caption(f"Total: ₹{s_grand_total:.2f} | Pending: ₹{(s_grand_total - s_payment):.2f}")
 
             if st.button("Save Sale", type="primary", key="save_sale"):
@@ -692,11 +846,16 @@ def main_app():
 
                     uc1, uc2, uc3 = st.columns(3)
                     with uc1:
-                        add_amt = st.number_input("Amount", min_value=0.0, step=0.01, key=f"sadd_{idx}", format="%.2f")
+                        add_amt_str = st.text_input("Amount", key=f"sadd_{idx}", placeholder="₹")
+                        try:
+                            add_amt = float(add_amt_str) if add_amt_str.strip() else 0.0
+                        except ValueError:
+                            add_amt = 0.0
                     with uc2:
                         if st.button("+ Add Payment", key=f"saddbt_{idx}"):
-                            st.session_state.sales[idx]["amountReceived"] = received + add_amt
-                            st.rerun()
+                            if add_amt > 0:
+                                st.session_state.sales[idx]["amountReceived"] = received + add_amt
+                                st.rerun()
                     with uc3:
                         if st.button("Delete", key=f"sdel_{idx}"):
                             st.session_state.sales.pop(idx)
@@ -809,6 +968,33 @@ def main_app():
                             else:
                                 st.write(f"Pending: :green[₹0.00] ✓")
 
+                        # Edit section
+                        with st.expander("✏️ Edit Records"):
+                            records = get_trader_records(name, "seller")
+                            if records:
+                                for i, rec in enumerate(records):
+                                    st.markdown(f"**{rec['session_name']}** - {rec['date']}")
+                                    rc1, rc2, rc3 = st.columns([2, 2, 2])
+                                    with rc1:
+                                        st.write(f"Bags: {rec['bags']}")
+                                        st.write(f"Amount: ₹{rec['amount']:.2f}")
+                                    with rc2:
+                                        st.write(f"Paid: :green[₹{rec['paid']:.2f}]")
+                                        st.write(f"Pending: :orange[₹{rec['pending']:.2f}]")
+                                    with rc3:
+                                        new_paid_str = st.text_input("Set paid to", key=f"sel_{name}_{i}", placeholder="₹")
+                                        if st.button("Update", key=f"selbtn_{name}_{i}"):
+                                            if new_paid_str.strip():
+                                                try:
+                                                    new_paid = float(new_paid_str)
+                                                    if update_specific_record(rec['session_id'], rec['record_id'], "seller", "amountPaid", new_paid):
+                                                        st.success("Updated!")
+                                                        fetch_sessions()
+                                                        st.rerun()
+                                                except ValueError:
+                                                    st.error("Invalid number")
+                                    st.divider()
+
     # ── BUYERS TAB ────────────────────────────────────────────────────
     with buyer_tab:
         buyers = stats['buyers']
@@ -858,6 +1044,33 @@ def main_app():
                                 st.write(f"Pending: :orange[₹{data['pending']:.2f}]")
                             else:
                                 st.write(f"Pending: :green[₹0.00] ✓")
+
+                        # Edit section
+                        with st.expander("✏️ Edit Records"):
+                            records = get_trader_records(name, "buyer")
+                            if records:
+                                for i, rec in enumerate(records):
+                                    st.markdown(f"**{rec['session_name']}** - {rec['date']}")
+                                    rc1, rc2, rc3 = st.columns([2, 2, 2])
+                                    with rc1:
+                                        st.write(f"Bags: {rec['bags']}")
+                                        st.write(f"Amount: ₹{rec['amount']:.2f}")
+                                    with rc2:
+                                        st.write(f"Received: :green[₹{rec['received']:.2f}]")
+                                        st.write(f"Pending: :orange[₹{rec['pending']:.2f}]")
+                                    with rc3:
+                                        new_received_str = st.text_input("Set received to", key=f"buy_{name}_{i}", placeholder="₹")
+                                        if st.button("Update", key=f"buybtn_{name}_{i}"):
+                                            if new_received_str.strip():
+                                                try:
+                                                    new_received = float(new_received_str)
+                                                    if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "amountReceived", new_received):
+                                                        st.success("Updated!")
+                                                        fetch_sessions()
+                                                        st.rerun()
+                                                except ValueError:
+                                                    st.error("Invalid number")
+                                    st.divider()
 
     st.divider()
 
