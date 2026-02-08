@@ -1,7 +1,6 @@
 import streamlit as st
-import json
 import uuid
-from datetime import datetime
+from datetime import datetime, date as date_type
 from supabase import create_client, Client
 
 # Supabase config
@@ -48,7 +47,17 @@ def init_session_state():
         try:
             supabase = get_supabase()
             session = supabase.auth.get_session()
-            if session:
+            if session and session.refresh_token:
+                refreshed = supabase.auth.refresh_session(session.refresh_token)
+                if refreshed and refreshed.session:
+                    st.session_state.user = refreshed.session.user
+                    st.session_state.access_token = refreshed.session.access_token
+                    st.session_state.refresh_token = refreshed.session.refresh_token
+                else:
+                    st.session_state.user = session.user
+                    st.session_state.access_token = session.access_token
+                    st.session_state.refresh_token = session.refresh_token
+            elif session:
                 st.session_state.user = session.user
                 st.session_state.access_token = session.access_token
                 st.session_state.refresh_token = session.refresh_token
@@ -168,7 +177,6 @@ def save_session(session_name: str):
 def load_session(session):
     purchases = session.get("purchases", [])
     sales = session.get("sales", [])
-    # Add defaults for old data
     today = str(datetime.now().date())
     for p in purchases:
         p.setdefault("date", today)
@@ -201,6 +209,72 @@ def delete_session(session_id: str):
         st.success("Session deleted")
     except Exception as e:
         st.error(f"Error deleting: {e}")
+
+
+def get_aggregate_stats(sessions):
+    """Calculate aggregate stats from all sessions."""
+    total_purchase = 0
+    total_sale = 0
+    total_bags_purchased = 0
+    total_bags_sold = 0
+    total_paid = 0
+    total_received = 0
+    all_sellers = {}  # name -> {bags, amount, paid, pending}
+    all_buyers = {}   # name -> {bags, amount, received, pending}
+
+    for sess in sessions:
+        for p in sess.get("purchases", []):
+            name = p.get("traderName", "Unknown")
+            amt = p.get("totalAmount", 0)
+            bags = p.get("totalBags", 0)
+            paid = p.get("amountPaid", 0)
+
+            total_purchase += amt
+            total_bags_purchased += bags
+            total_paid += paid
+
+            if name not in all_sellers:
+                all_sellers[name] = {"bags": 0, "amount": 0, "paid": 0}
+            all_sellers[name]["bags"] += bags
+            all_sellers[name]["amount"] += amt
+            all_sellers[name]["paid"] += paid
+
+        for s in sess.get("sales", []):
+            name = s.get("traderName", "Unknown")
+            amt = s.get("totalAmount", 0)
+            bags = s.get("totalBags", 0)
+            received = s.get("amountReceived", 0)
+
+            total_sale += amt
+            total_bags_sold += bags
+            total_received += received
+
+            if name not in all_buyers:
+                all_buyers[name] = {"bags": 0, "amount": 0, "received": 0}
+            all_buyers[name]["bags"] += bags
+            all_buyers[name]["amount"] += amt
+            all_buyers[name]["received"] += received
+
+    # Add pending to each trader
+    for name in all_sellers:
+        all_sellers[name]["pending"] = all_sellers[name]["amount"] - all_sellers[name]["paid"]
+    for name in all_buyers:
+        all_buyers[name]["pending"] = all_buyers[name]["amount"] - all_buyers[name]["received"]
+
+    return {
+        "total_purchase": total_purchase,
+        "total_sale": total_sale,
+        "net_profit": total_sale - total_purchase,
+        "total_bags_purchased": total_bags_purchased,
+        "total_bags_sold": total_bags_sold,
+        "remaining_bags": total_bags_purchased - total_bags_sold,
+        "total_paid": total_paid,
+        "total_received": total_received,
+        "pending_to_pay": total_purchase - total_paid,
+        "pending_to_receive": total_sale - total_received,
+        "sellers": all_sellers,
+        "buyers": all_buyers,
+    }
 
 
 # ── Auth Page ────────────────────────────────────────────────────────
@@ -258,8 +332,178 @@ def main_app():
 
     st.divider()
 
-    # ── Session Controls ─────────────────────────────────────────────
-    c1, c2, c3 = st.columns([4, 1, 1])
+    # Fetch all sessions for aggregate stats
+    fetch_sessions()
+    sessions = st.session_state.saved_sessions
+    stats = get_aggregate_stats(sessions)
+
+    # ══════════════════════════════════════════════════════════════════
+    # OVERALL DASHBOARD (All Sessions Summary)
+    # ══════════════════════════════════════════════════════════════════
+    st.subheader("📊 Overall Dashboard (All Sessions)")
+
+    # Net Profit/Loss
+    d1, d2, d3 = st.columns(3)
+    d1.metric("Total Purchase", f"₹{stats['total_purchase']:.2f}")
+    d2.metric("Total Sale", f"₹{stats['total_sale']:.2f}")
+    profit = stats['net_profit']
+    d3.metric(
+        "Net Profit" if profit >= 0 else "Net Loss",
+        f"₹{abs(profit):.2f}",
+        delta=f"{'+'if profit>=0 else ''}{profit:.2f}",
+    )
+
+    # Inventory Status
+    i1, i2, i3 = st.columns(3)
+    i1.metric("Bags Purchased", stats['total_bags_purchased'])
+    i2.metric("Bags Sold", stats['total_bags_sold'])
+    i3.metric("Remaining Bags", stats['remaining_bags'],
+              delta=f"{stats['remaining_bags']}" if stats['remaining_bags'] != 0 else None)
+
+    # Payment Status Summary
+    pay1, pay2 = st.columns(2)
+    with pay1:
+        st.markdown("**💰 To Pay (Sellers)**")
+        st.write(f"Total: ₹{stats['total_purchase']:.2f}")
+        st.write(f"Paid: :green[₹{stats['total_paid']:.2f}]")
+        st.write(f"Pending: :orange[₹{stats['pending_to_pay']:.2f}]")
+    with pay2:
+        st.markdown("**💵 To Receive (Buyers)**")
+        st.write(f"Total: ₹{stats['total_sale']:.2f}")
+        st.write(f"Received: :green[₹{stats['total_received']:.2f}]")
+        st.write(f"Pending: :orange[₹{stats['pending_to_receive']:.2f}]")
+
+    st.divider()
+
+    # ══════════════════════════════════════════════════════════════════
+    # SELLERS & BUYERS SECTIONS
+    # ══════════════════════════════════════════════════════════════════
+    seller_tab, buyer_tab = st.tabs(["👥 Sellers (I buy from)", "🏪 Buyers (I sell to)"])
+
+    # ── SELLERS TAB ───────────────────────────────────────────────────
+    with seller_tab:
+        sellers = stats['sellers']
+        if not sellers:
+            st.info("No sellers yet. Add purchases to see seller connections.")
+        else:
+            seller_search = st.text_input("Search sellers...", key="seller_search")
+            filtered_sellers = {k: v for k, v in sellers.items()
+                              if not seller_search or seller_search.lower() in k.lower()}
+
+            if not filtered_sellers:
+                st.info(f'No sellers found for "{seller_search}"')
+            else:
+                for name, data in sorted(filtered_sellers.items(), key=lambda x: x[1]['pending'], reverse=True):
+                    with st.container(border=True):
+                        c1, c2 = st.columns([3, 2])
+                        with c1:
+                            st.markdown(f"**{name}**")
+                            st.write(f"Bags: {data['bags']} | Total: ₹{data['amount']:.2f}")
+                        with c2:
+                            st.write(f"Paid: :green[₹{data['paid']:.2f}]")
+                            if data['pending'] > 0:
+                                st.write(f"Pending: :orange[₹{data['pending']:.2f}]")
+                            else:
+                                st.write(f"Pending: :green[₹0.00] ✓")
+
+    # ── BUYERS TAB ────────────────────────────────────────────────────
+    with buyer_tab:
+        buyers = stats['buyers']
+        if not buyers:
+            st.info("No buyers yet. Add sales to see buyer connections.")
+        else:
+            buyer_search = st.text_input("Search buyers...", key="buyer_search")
+            filtered_buyers = {k: v for k, v in buyers.items()
+                             if not buyer_search or buyer_search.lower() in k.lower()}
+
+            if not filtered_buyers:
+                st.info(f'No buyers found for "{buyer_search}"')
+            else:
+                for name, data in sorted(filtered_buyers.items(), key=lambda x: x[1]['pending'], reverse=True):
+                    with st.container(border=True):
+                        c1, c2 = st.columns([3, 2])
+                        with c1:
+                            st.markdown(f"**{name}**")
+                            st.write(f"Bags: {data['bags']} | Total: ₹{data['amount']:.2f}")
+                        with c2:
+                            st.write(f"Received: :green[₹{data['received']:.2f}]")
+                            if data['pending'] > 0:
+                                st.write(f"Pending: :orange[₹{data['pending']:.2f}]")
+                            else:
+                                st.write(f"Pending: :green[₹0.00] ✓")
+
+    st.divider()
+
+    # ══════════════════════════════════════════════════════════════════
+    # SAVED SESSIONS (moved from history page to main dashboard)
+    # ══════════════════════════════════════════════════════════════════
+    st.subheader("📋 Saved Sessions")
+
+    if not sessions:
+        st.info("No saved sessions yet. Create and save a session below.")
+    else:
+        session_search = st.text_input("Search sessions by name or trader...", key="session_search")
+
+        filtered_sessions = sessions
+        if session_search:
+            search_lower = session_search.lower()
+            filtered_sessions = [
+                s for s in sessions
+                if search_lower in s.get("session_name", "").lower()
+                or any(search_lower in p.get("traderName", "").lower() for p in s.get("purchases", []))
+                or any(search_lower in sl.get("traderName", "").lower() for sl in s.get("sales", []))
+            ]
+
+        if not filtered_sessions:
+            st.info(f'No sessions found for "{session_search}"')
+        else:
+            for sess in filtered_sessions:
+                with st.container(border=True):
+                    h1, h2 = st.columns([5, 2])
+                    with h1:
+                        st.markdown(f"**{sess['session_name']}**")
+                        sess_sellers = set(p.get("traderName", "") for p in sess.get("purchases", []))
+                        sess_buyers = set(s.get("traderName", "") for s in sess.get("sales", []))
+                        if sess_sellers:
+                            st.caption(f"Sellers: {', '.join(sess_sellers)}")
+                        if sess_buyers:
+                            st.caption(f"Buyers: {', '.join(sess_buyers)}")
+                    with h2:
+                        st.caption(sess.get("created_at", "")[:10])
+
+                    m1, m2, m3 = st.columns(3)
+                    m1.metric("Purchase", f"₹{sess['total_purchase_amount']:.2f}")
+                    m2.metric("Sale", f"₹{sess['total_sale_amount']:.2f}")
+                    sess_profit = sess["net_profit"]
+                    m3.metric(
+                        "Profit" if sess_profit >= 0 else "Loss",
+                        f"₹{abs(sess_profit):.2f}",
+                        delta=f"{'+'if sess_profit>=0 else ''}{sess_profit:.2f}",
+                    )
+
+                    # Bags info
+                    sess_bags_purchased = sum(p.get("totalBags", 0) for p in sess.get("purchases", []))
+                    sess_bags_sold = sum(s.get("totalBags", 0) for s in sess.get("sales", []))
+                    st.caption(f"Bags: {sess_bags_purchased} purchased, {sess_bags_sold} sold, {sess_bags_purchased - sess_bags_sold} remaining")
+
+                    b1, b2 = st.columns(2)
+                    with b1:
+                        if st.button("Load", key=f"load_{sess['id']}", use_container_width=True):
+                            load_session(sess)
+                            st.rerun()
+                    with b2:
+                        if st.button("Delete", key=f"del_{sess['id']}", use_container_width=True, type="secondary"):
+                            delete_session(sess["id"])
+                            st.rerun()
+
+    st.divider()
+
+    # ══════════════════════════════════════════════════════════════════
+    # SESSION CONTROLS (Create/Edit Session)
+    # ══════════════════════════════════════════════════════════════════
+    st.subheader("➕ Create/Edit Session")
+
+    c1, c2 = st.columns([4, 1])
     with c1:
         session_name = st.text_input(
             "Session name",
@@ -272,62 +516,29 @@ def main_app():
         if st.button("Save Session", type="primary", use_container_width=True):
             save_session(session_name)
             st.rerun()
-    with c3:
-        if st.button("📋 History", use_container_width=True):
-            st.session_state.page = "history"
-            st.rerun()
 
-    # ── Summary Dashboard ────────────────────────────────────────────
+    # Current session summary
     purchases = st.session_state.purchases
     sales = st.session_state.sales
 
     if purchases or sales:
+        st.markdown("#### Current Session Summary")
         total_purchase_amt = sum(p["totalAmount"] for p in purchases)
         total_sale_amt = sum(s["totalAmount"] for s in sales)
         net_profit = total_sale_amt - total_purchase_amt
 
         total_bags_purchased = sum(p["totalBags"] for p in purchases)
         total_bags_sold = sum(s["totalBags"] for s in sales)
-        remaining = total_bags_purchased - total_bags_sold
 
-        total_to_pay = sum(p["totalAmount"] for p in purchases)
-        total_paid = sum(p.get("amountPaid", 0) for p in purchases)
-        total_to_receive = sum(s["totalAmount"] for s in sales)
-        total_received = sum(s.get("amountReceived", 0) for s in sales)
-
-        # Profit
-        st.subheader("Net Profit/Loss")
-        p1, p2, p3 = st.columns(3)
-        p1.metric("Total Purchase", f"₹{total_purchase_amt:.2f}")
-        p2.metric("Total Sale", f"₹{total_sale_amt:.2f}")
-        p3.metric(
-            "Net Profit" if net_profit >= 0 else "Net Loss",
+        cp1, cp2, cp3 = st.columns(3)
+        cp1.metric("Purchase", f"₹{total_purchase_amt:.2f}")
+        cp2.metric("Sale", f"₹{total_sale_amt:.2f}")
+        cp3.metric(
+            "Profit" if net_profit >= 0 else "Loss",
             f"₹{abs(net_profit):.2f}",
             delta=f"{'+'if net_profit>=0 else ''}{net_profit:.2f}",
         )
-
-        # Inventory
-        st.subheader("Inventory Status")
-        i1, i2, i3 = st.columns(3)
-        i1.metric("Bags Purchased", total_bags_purchased)
-        i2.metric("Bags Sold", total_bags_sold)
-        i3.metric("Remaining", remaining, delta=f"{remaining}")
-
-        # Payment Status
-        st.subheader("Payment Status")
-        pay1, pay2 = st.columns(2)
-        with pay1:
-            st.markdown("**To Pay (Sellers)**")
-            st.write(f"Total: ₹{total_to_pay:.2f}")
-            st.write(f"Paid: :green[₹{total_paid:.2f}]")
-            st.write(f"Pending: :orange[₹{(total_to_pay - total_paid):.2f}]")
-        with pay2:
-            st.markdown("**To Receive (Buyers)**")
-            st.write(f"Total: ₹{total_to_receive:.2f}")
-            st.write(f"Received: :green[₹{total_received:.2f}]")
-            st.write(f"Pending: :orange[₹{(total_to_receive - total_received):.2f}]")
-
-        st.divider()
+        st.caption(f"Bags: {total_bags_purchased} purchased, {total_bags_sold} sold, {total_bags_purchased - total_bags_sold} remaining")
 
     # ── Purchase & Sale Sections ─────────────────────────────────────
     tab_purchase, tab_sale = st.tabs(["📥 Purchase (Buying)", "📤 Sale (Selling)"])
@@ -338,7 +549,6 @@ def main_app():
         with pt1:
             purchase_trader = st.text_input("Seller Name", key="purchase_trader_input", placeholder="Enter seller name")
         with pt2:
-            from datetime import date as date_type
             purchase_date = st.date_input("Date", value=date_type.today(), key="purchase_date")
 
         st.markdown("**Add Entry**")
@@ -366,7 +576,6 @@ def main_app():
                 })
                 st.rerun()
 
-        # Show current entries
         p_entries = st.session_state.purchase_entries
         if p_entries:
             import pandas as pd
@@ -381,21 +590,18 @@ def main_app():
             entries_amount = sum(e["totalAmount"] for e in p_entries)
             st.write(f"**Totals:** {total_bags} bags | {total_weight_q:.3f} Q | ₹{entries_amount:.2f}")
 
-            # Delete entry
             if len(p_entries) > 0:
                 del_idx = st.selectbox("Remove entry #", range(1, len(p_entries) + 1), key="p_del_idx")
                 if st.button("Remove Entry", key="p_remove"):
                     st.session_state.purchase_entries.pop(del_idx - 1)
                     st.rerun()
 
-            # Bardhan
             st.markdown("**Charges**")
             bardhan_rate = st.number_input("Bardhan (₹/bag)", value=DEFAULT_BARDHAN_RATE, step=0.5, key="p_bardhan")
             bardhan_amt = total_bags * bardhan_rate
             grand_total = entries_amount + bardhan_amt
             st.info(f"Bardhan: {total_bags} bags × ₹{bardhan_rate} = **₹{bardhan_amt:.2f}** | Grand Total: **₹{grand_total:.2f}**")
 
-            # Payment
             payment = st.number_input("Amount Paid to Seller (₹)", value=0.0, step=0.01, key="p_payment", format="%.2f")
             st.caption(f"Total: ₹{grand_total:.2f} | Pending: ₹{(grand_total - payment):.2f}")
 
@@ -417,9 +623,9 @@ def main_app():
                 st.session_state.purchase_entries = []
                 st.rerun()
 
-        # Saved purchases
+        # Saved purchases in current session
         if purchases:
-            st.markdown("### Saved Purchases")
+            st.markdown("### Saved Purchases (Current Session)")
             p_search = st.text_input("Search seller name...", key="purchase_search")
             display_purchases = purchases
             if p_search:
@@ -507,7 +713,6 @@ def main_app():
                     st.session_state.sale_entries.pop(del_idx_s - 1)
                     st.rerun()
 
-            # Bardhan + Kanta
             st.markdown("**Charges**")
             ch1, ch2 = st.columns(2)
             with ch1:
@@ -546,9 +751,9 @@ def main_app():
                 st.session_state.sale_entries = []
                 st.rerun()
 
-        # Saved sales
+        # Saved sales in current session
         if sales:
-            st.markdown("### Saved Sales")
+            st.markdown("### Saved Sales (Current Session)")
             s_search = st.text_input("Search buyer name...", key="sale_search")
             display_sales = sales
             if s_search:
@@ -587,7 +792,7 @@ def main_app():
     # Reset button
     if purchases or sales:
         st.divider()
-        if st.button("Reset All", type="secondary"):
+        if st.button("Reset Current Session", type="secondary"):
             st.session_state.purchases = []
             st.session_state.sales = []
             st.session_state.purchase_entries = []
@@ -597,86 +802,11 @@ def main_app():
             st.rerun()
 
 
-# ── History Page ──────────────────────────────────────────────────────
-def history_page():
-    user = st.session_state.user
-
-    # Header with back button
-    col_back, col_title, col_user, col_logout = st.columns([1, 4, 3, 1])
-    with col_back:
-        if st.button("← Back", use_container_width=True):
-            st.session_state.page = "main"
-            st.rerun()
-    with col_title:
-        st.markdown("# 📋 Session History")
-    with col_user:
-        st.caption(f"Logged in as **{user.email}**")
-    with col_logout:
-        if st.button("Logout", key="hist_logout"):
-            logout()
-            st.rerun()
-
-    st.divider()
-
-    fetch_sessions()
-    sessions = st.session_state.saved_sessions
-
-    search = st.text_input("Search by trader name or session...", key="trader_search")
-    if search:
-        search_lower = search.lower()
-        sessions = [
-            s for s in sessions
-            if search_lower in s.get("session_name", "").lower()
-            or any(search_lower in p.get("traderName", "").lower() for p in s.get("purchases", []))
-            or any(search_lower in sl.get("traderName", "").lower() for sl in s.get("sales", []))
-        ]
-
-    if not sessions:
-        st.info("No saved sessions found" if not search else f'No sessions found for "{search}"')
-    else:
-        for sess in sessions:
-            with st.container(border=True):
-                h1, h2 = st.columns([5, 2])
-                with h1:
-                    st.markdown(f"**{sess['session_name']}**")
-                    sellers = set(p.get("traderName", "") for p in sess.get("purchases", []))
-                    buyers = set(s.get("traderName", "") for s in sess.get("sales", []))
-                    if sellers:
-                        st.caption(f"Sellers: {', '.join(sellers)}")
-                    if buyers:
-                        st.caption(f"Buyers: {', '.join(buyers)}")
-                with h2:
-                    st.caption(sess.get("created_at", "")[:10])
-
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Purchase", f"₹{sess['total_purchase_amount']:.2f}")
-                m2.metric("Sale", f"₹{sess['total_sale_amount']:.2f}")
-                profit = sess["net_profit"]
-                m3.metric(
-                    "Profit" if profit >= 0 else "Loss",
-                    f"₹{abs(profit):.2f}",
-                    delta=f"{'+'if profit>=0 else ''}{profit:.2f}",
-                )
-
-                b1, b2 = st.columns(2)
-                with b1:
-                    if st.button("Load", key=f"load_{sess['id']}", use_container_width=True):
-                        load_session(sess)
-                        st.session_state.page = "main"
-                        st.rerun()
-                with b2:
-                    if st.button("Delete", key=f"del_{sess['id']}", use_container_width=True, type="secondary"):
-                        delete_session(sess["id"])
-                        st.rerun()
-
-
 # ── Main ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Chilli Trade Tracker", page_icon="🌶️", layout="wide")
 init_session_state()
 
 if st.session_state.user is None:
     auth_page()
-elif st.session_state.page == "history":
-    history_page()
 else:
     main_app()
