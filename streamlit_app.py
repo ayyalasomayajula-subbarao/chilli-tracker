@@ -382,9 +382,16 @@ def get_aggregate_stats(sessions):
     all_sellers = {}  # name -> {bags, amount, paid, pending, sales_to (buyers)}
     all_buyers = {}   # name -> {bags, amount, received, pending, bought_from (sellers)}
 
+    # Track original display names (first occurrence wins)
+    seller_display_names = {}
+    buyer_display_names = {}
+
     for sess in sessions:
         for p in sess.get("purchases", []):
-            name = p.get("traderName", "Unknown")
+            raw_name = p.get("traderName", "Unknown")
+            name = raw_name.lower()
+            if name not in seller_display_names:
+                seller_display_names[name] = raw_name
             amt = p.get("totalAmount", 0)
             bags = p.get("totalBags", 0)
             paid = p.get("amountPaid", 0)
@@ -400,7 +407,10 @@ def get_aggregate_stats(sessions):
             all_sellers[name]["paid"] += paid
 
         for s in sess.get("sales", []):
-            buyer_name = s.get("traderName", "Unknown")
+            raw_buyer = s.get("traderName", "Unknown")
+            buyer_name = raw_buyer.lower()
+            if buyer_name not in buyer_display_names:
+                buyer_display_names[buyer_name] = raw_buyer
             source_seller = s.get("sourceSeller", "")
             amt = s.get("totalAmount", 0)
             bags = s.get("totalBags", 0)
@@ -419,16 +429,24 @@ def get_aggregate_stats(sessions):
             # Track relationships
             if source_seller:
                 all_buyers[buyer_name]["bought_from"].add(source_seller)
-                if source_seller in all_sellers:
-                    all_sellers[source_seller]["sold_to"].add(buyer_name)
+                source_key = source_seller.lower()
+                if source_key in all_sellers:
+                    all_sellers[source_key]["sold_to"].add(raw_buyer)
 
-    # Add pending to each trader and convert sets to lists
-    for name in all_sellers:
-        all_sellers[name]["pending"] = all_sellers[name]["amount"] - all_sellers[name]["paid"]
-        all_sellers[name]["sold_to"] = list(all_sellers[name]["sold_to"])
-    for name in all_buyers:
-        all_buyers[name]["pending"] = all_buyers[name]["amount"] - all_buyers[name]["received"]
-        all_buyers[name]["bought_from"] = list(all_buyers[name]["bought_from"])
+    # Add pending to each trader, convert sets to lists, and remap to display names
+    display_sellers = {}
+    for key in all_sellers:
+        all_sellers[key]["pending"] = all_sellers[key]["amount"] - all_sellers[key]["paid"]
+        all_sellers[key]["sold_to"] = list(all_sellers[key]["sold_to"])
+        display_name = seller_display_names.get(key, key)
+        display_sellers[display_name] = all_sellers[key]
+
+    display_buyers = {}
+    for key in all_buyers:
+        all_buyers[key]["pending"] = all_buyers[key]["amount"] - all_buyers[key]["received"]
+        all_buyers[key]["bought_from"] = list(all_buyers[key]["bought_from"])
+        display_name = buyer_display_names.get(key, key)
+        display_buyers[display_name] = all_buyers[key]
 
     return {
         "total_purchase": total_purchase,
@@ -441,8 +459,8 @@ def get_aggregate_stats(sessions):
         "total_received": total_received,
         "pending_to_pay": total_purchase - total_paid,
         "pending_to_receive": total_sale - total_received,
-        "sellers": all_sellers,
-        "buyers": all_buyers,
+        "sellers": display_sellers,
+        "buyers": display_buyers,
     }
 
 
