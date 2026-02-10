@@ -627,7 +627,7 @@ def main_app():
             grand_total = entries_amount + bardhan_amt
             st.info(f"Bardhan: {total_bags} bags × ₹{bardhan_rate} = **₹{bardhan_amt:.2f}** | Grand Total: **₹{grand_total:.2f}**")
 
-            payment_str = st.text_input("Amount Paid to Seller (₹)", key="p_payment", placeholder="Enter amount paid")
+            payment_str = st.text_input("Advance Paid (₹)", key="p_payment", placeholder="Enter advance paid")
             try:
                 payment = float(payment_str) if payment_str.strip() else 0.0
             except ValueError:
@@ -676,24 +676,41 @@ def main_app():
                     )
                     paid = rec.get("amountPaid", 0)
                     pending = rec["totalAmount"] - paid
-                    st.write(f"Paid: :green[₹{paid:.2f}] | Pending: :orange[₹{pending:.2f}]")
+                    st.write(f"Advance Paid: :green[₹{paid:.2f}] | Pending: :orange[₹{pending:.2f}]")
 
-                    uc1, uc2, uc3 = st.columns(3)
-                    with uc1:
-                        add_amt_str = st.text_input("Amount", key=f"padd_{idx}", placeholder="₹")
-                        try:
-                            add_amt = float(add_amt_str) if add_amt_str.strip() else 0.0
-                        except ValueError:
-                            add_amt = 0.0
-                    with uc2:
-                        if st.button("+ Add Payment", key=f"paddbt_{idx}"):
-                            if add_amt > 0:
-                                st.session_state.purchases[idx]["amountPaid"] = paid + add_amt
-                                st.rerun()
-                    with uc3:
-                        if st.button("Delete", key=f"pdel_{idx}"):
-                            st.session_state.purchases.pop(idx)
-                            st.rerun()
+                    if st.button("Delete", key=f"pdel_{idx}"):
+                        st.session_state.purchases.pop(idx)
+                        st.rerun()
+
+            # Total and Advance Paid for all purchases
+            p_total_amt = sum(r['totalAmount'] for r in display_purchases)
+            p_total_paid = sum(r.get('amountPaid', 0) for r in display_purchases)
+            p_total_pending = p_total_amt - p_total_paid
+            st.markdown(f"**Total Amount: ₹{p_total_amt:.2f}**")
+            st.write(f"Advance Paid: :green[₹{p_total_paid:.2f}] | Pending: :orange[₹{p_total_pending:.2f}]")
+
+            pa1, pa2 = st.columns(2)
+            with pa1:
+                p_adv_str = st.text_input("Advance Paid (₹)", key="p_adv_paid", placeholder="₹")
+                try:
+                    p_adv = float(p_adv_str) if p_adv_str.strip() else 0.0
+                except ValueError:
+                    p_adv = 0.0
+            with pa2:
+                st.write("")
+                st.write("")
+                if st.button("+ Add Advance", key="p_adv_btn", type="primary"):
+                    if p_adv > 0:
+                        # Distribute advance across purchases
+                        remaining = p_adv
+                        for pidx, prec in enumerate(purchases):
+                            paid = prec.get("amountPaid", 0)
+                            pend = prec["totalAmount"] - paid
+                            if pend > 0 and remaining > 0:
+                                to_add = min(remaining, pend)
+                                st.session_state.purchases[pidx]["amountPaid"] = paid + to_add
+                                remaining -= to_add
+                        st.rerun()
 
     # ── SALE TAB ─────────────────────────────────────────────────────
     with tab_sale:
@@ -788,7 +805,7 @@ def main_app():
                 f"Grand Total: **₹{s_grand_total:.2f}**"
             )
 
-            s_payment_str = st.text_input("Amount Received from Buyer (₹)", key="s_payment", placeholder="Enter amount received")
+            s_payment_str = st.text_input("Advance Paid (₹)", key="s_payment", placeholder="Enter advance paid")
             try:
                 s_payment = float(s_payment_str) if s_payment_str.strip() else 0.0
             except ValueError:
@@ -843,24 +860,40 @@ def main_app():
                     )
                     received = rec.get("amountReceived", 0)
                     pending = rec["totalAmount"] - received
-                    st.write(f"Received: :green[₹{received:.2f}] | Pending: :orange[₹{pending:.2f}]")
+                    st.write(f"Advance Paid: :green[₹{received:.2f}] | Pending: :orange[₹{pending:.2f}]")
 
-                    uc1, uc2, uc3 = st.columns(3)
-                    with uc1:
-                        add_amt_str = st.text_input("Amount", key=f"sadd_{idx}", placeholder="₹")
-                        try:
-                            add_amt = float(add_amt_str) if add_amt_str.strip() else 0.0
-                        except ValueError:
-                            add_amt = 0.0
-                    with uc2:
-                        if st.button("+ Add Payment", key=f"saddbt_{idx}"):
-                            if add_amt > 0:
-                                st.session_state.sales[idx]["amountReceived"] = received + add_amt
-                                st.rerun()
-                    with uc3:
-                        if st.button("Delete", key=f"sdel_{idx}"):
-                            st.session_state.sales.pop(idx)
-                            st.rerun()
+                    if st.button("Delete", key=f"sdel_{idx}"):
+                        st.session_state.sales.pop(idx)
+                        st.rerun()
+
+            # Total and Advance Paid for all sales
+            s_total_amt = sum(r['totalAmount'] for r in display_sales)
+            s_total_received = sum(r.get('amountReceived', 0) for r in display_sales)
+            s_total_pending = s_total_amt - s_total_received
+            st.markdown(f"**Total Amount: ₹{s_total_amt:.2f}**")
+            st.write(f"Advance Paid: :green[₹{s_total_received:.2f}] | Pending: :orange[₹{s_total_pending:.2f}]")
+
+            sa1, sa2 = st.columns(2)
+            with sa1:
+                s_adv_str = st.text_input("Advance Paid (₹)", key="s_adv_paid", placeholder="₹")
+                try:
+                    s_adv = float(s_adv_str) if s_adv_str.strip() else 0.0
+                except ValueError:
+                    s_adv = 0.0
+            with sa2:
+                st.write("")
+                st.write("")
+                if st.button("+ Add Advance", key="s_adv_btn", type="primary"):
+                    if s_adv > 0:
+                        remaining = s_adv
+                        for sidx, srec in enumerate(sales):
+                            rcvd = srec.get("amountReceived", 0)
+                            pend = srec["totalAmount"] - rcvd
+                            if pend > 0 and remaining > 0:
+                                to_add = min(remaining, pend)
+                                st.session_state.sales[sidx]["amountReceived"] = rcvd + to_add
+                                remaining -= to_add
+                        st.rerun()
 
     # Reset button
     if purchases or sales:
@@ -904,12 +937,12 @@ def main_app():
     with pay1:
         st.markdown("**💰 To Pay (Sellers)**")
         st.write(f"Total: ₹{stats['total_purchase']:.2f}")
-        st.write(f"Paid: :green[₹{stats['total_paid']:.2f}]")
+        st.write(f"Advance Paid: :green[₹{stats['total_paid']:.2f}]")
         st.write(f"Pending: :orange[₹{stats['pending_to_pay']:.2f}]")
     with pay2:
         st.markdown("**💵 To Receive (Buyers)**")
         st.write(f"Total: ₹{stats['total_sale']:.2f}")
-        st.write(f"Received: :green[₹{stats['total_received']:.2f}]")
+        st.write(f"Advance Paid: :green[₹{stats['total_received']:.2f}]")
         st.write(f"Pending: :orange[₹{stats['pending_to_receive']:.2f}]")
 
     st.divider()
@@ -963,7 +996,7 @@ def main_app():
                             if data.get('sold_to'):
                                 st.caption(f"Sold to: {', '.join(data['sold_to'])}")
                         with c2:
-                            st.write(f"Paid: :green[₹{data['paid']:.2f}]")
+                            st.write(f"Advance Paid: :green[₹{data['paid']:.2f}]")
                             if data['pending'] > 0:
                                 st.write(f"Pending: :orange[₹{data['pending']:.2f}]")
                             else:
@@ -975,27 +1008,21 @@ def main_app():
                             if records:
                                 for i, rec in enumerate(records):
                                     st.markdown(f"**{rec['session_name']}**")
-                                    # Current values display
-                                    st.caption(f"Current: Date: {rec['date']} | Bags: {rec['bags']} | Amount: ₹{rec['amount']:.2f} | Paid: ₹{rec['paid']:.2f} | Pending: ₹{rec['pending']:.2f}")
+                                    st.caption(f"Current: Date: {rec['date']} | Bags: {rec['bags']} | Amount: ₹{rec['amount']:.2f}")
 
-                                    # Edit fields
-                                    ec1, ec2, ec3, ec4 = st.columns(4)
+                                    ec1, ec2, ec3 = st.columns(3)
                                     with ec1:
                                         new_date = st.text_input("Date", value=rec['date'], key=f"sel_date_{name}_{i}")
                                     with ec2:
                                         new_bags_str = st.text_input("Bags", key=f"sel_bags_{name}_{i}", placeholder=str(rec['bags']))
                                     with ec3:
                                         new_amt_str = st.text_input("Amount (₹)", key=f"sel_amt_{name}_{i}", placeholder=f"{rec['amount']:.2f}")
-                                    with ec4:
-                                        new_paid_str = st.text_input("Paid (₹)", key=f"sel_paid_{name}_{i}", placeholder=f"{rec['paid']:.2f}")
 
                                     if st.button("Update Record", key=f"selbtn_{name}_{i}", type="primary"):
                                         updates_made = False
-                                        # Update date if changed
                                         if new_date and new_date != rec['date']:
                                             if update_specific_record(rec['session_id'], rec['record_id'], "seller", "date", new_date):
                                                 updates_made = True
-                                        # Update bags if provided
                                         if new_bags_str.strip():
                                             try:
                                                 new_bags = int(new_bags_str)
@@ -1003,7 +1030,6 @@ def main_app():
                                                     updates_made = True
                                             except ValueError:
                                                 st.error("Invalid bags number")
-                                        # Update amount if provided
                                         if new_amt_str.strip():
                                             try:
                                                 new_amt = float(new_amt_str)
@@ -1011,20 +1037,37 @@ def main_app():
                                                     updates_made = True
                                             except ValueError:
                                                 st.error("Invalid amount")
-                                        # Update paid if provided
-                                        if new_paid_str.strip():
-                                            try:
-                                                new_paid = float(new_paid_str)
-                                                if update_specific_record(rec['session_id'], rec['record_id'], "seller", "amountPaid", new_paid):
-                                                    updates_made = True
-                                            except ValueError:
-                                                st.error("Invalid paid amount")
 
                                         if updates_made:
                                             st.success("Updated!")
                                             fetch_sessions()
                                             st.rerun()
                                     st.divider()
+
+                                # Total and Advance Paid at bottom
+                                total_amt = sum(r['amount'] for r in records)
+                                total_paid = sum(r['paid'] for r in records)
+                                total_pending = total_amt - total_paid
+                                st.markdown(f"**Total Amount: ₹{total_amt:.2f}**")
+                                st.write(f"Advance Paid: :green[₹{total_paid:.2f}] | Pending: :orange[₹{total_pending:.2f}]")
+
+                                ap1, ap2 = st.columns(2)
+                                with ap1:
+                                    adv_paid_str = st.text_input("Advance Paid (₹)", key=f"sel_adv_{name}", placeholder="₹")
+                                    try:
+                                        adv_paid = float(adv_paid_str) if adv_paid_str.strip() else 0.0
+                                    except ValueError:
+                                        adv_paid = 0.0
+                                with ap2:
+                                    st.write("")
+                                    st.write("")
+                                    if st.button("+ Add Advance", key=f"sel_adv_btn_{name}", type="primary"):
+                                        if adv_paid > 0:
+                                            count = update_trader_payment(name, "seller", add_amount=adv_paid)
+                                            if count > 0:
+                                                st.success(f"Added ₹{adv_paid:.2f} advance payment")
+                                                fetch_sessions()
+                                                st.rerun()
 
     # ── BUYERS TAB ────────────────────────────────────────────────────
     with buyer_tab:
@@ -1070,7 +1113,7 @@ def main_app():
                             if data.get('bought_from'):
                                 st.caption(f"Bought from: {', '.join(data['bought_from'])}")
                         with c2:
-                            st.write(f"Received: :green[₹{data['received']:.2f}]")
+                            st.write(f"Advance Paid: :green[₹{data['received']:.2f}]")
                             if data['pending'] > 0:
                                 st.write(f"Pending: :orange[₹{data['pending']:.2f}]")
                             else:
@@ -1082,27 +1125,21 @@ def main_app():
                             if records:
                                 for i, rec in enumerate(records):
                                     st.markdown(f"**{rec['session_name']}**")
-                                    # Current values display
-                                    st.caption(f"Current: Date: {rec['date']} | Bags: {rec['bags']} | Amount: ₹{rec['amount']:.2f} | Received: ₹{rec['received']:.2f} | Pending: ₹{rec['pending']:.2f}")
+                                    st.caption(f"Current: Date: {rec['date']} | Bags: {rec['bags']} | Amount: ₹{rec['amount']:.2f}")
 
-                                    # Edit fields
-                                    ec1, ec2, ec3, ec4 = st.columns(4)
+                                    ec1, ec2, ec3 = st.columns(3)
                                     with ec1:
                                         new_date = st.text_input("Date", value=rec['date'], key=f"buy_date_{name}_{i}")
                                     with ec2:
                                         new_bags_str = st.text_input("Bags", key=f"buy_bags_{name}_{i}", placeholder=str(rec['bags']))
                                     with ec3:
                                         new_amt_str = st.text_input("Amount (₹)", key=f"buy_amt_{name}_{i}", placeholder=f"{rec['amount']:.2f}")
-                                    with ec4:
-                                        new_received_str = st.text_input("Received (₹)", key=f"buy_rcv_{name}_{i}", placeholder=f"{rec['received']:.2f}")
 
                                     if st.button("Update Record", key=f"buybtn_{name}_{i}", type="primary"):
                                         updates_made = False
-                                        # Update date if changed
                                         if new_date and new_date != rec['date']:
                                             if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "date", new_date):
                                                 updates_made = True
-                                        # Update bags if provided
                                         if new_bags_str.strip():
                                             try:
                                                 new_bags = int(new_bags_str)
@@ -1110,7 +1147,6 @@ def main_app():
                                                     updates_made = True
                                             except ValueError:
                                                 st.error("Invalid bags number")
-                                        # Update amount if provided
                                         if new_amt_str.strip():
                                             try:
                                                 new_amt = float(new_amt_str)
@@ -1118,20 +1154,37 @@ def main_app():
                                                     updates_made = True
                                             except ValueError:
                                                 st.error("Invalid amount")
-                                        # Update received if provided
-                                        if new_received_str.strip():
-                                            try:
-                                                new_received = float(new_received_str)
-                                                if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "amountReceived", new_received):
-                                                    updates_made = True
-                                            except ValueError:
-                                                st.error("Invalid received amount")
 
                                         if updates_made:
                                             st.success("Updated!")
                                             fetch_sessions()
                                             st.rerun()
                                     st.divider()
+
+                                # Total and Advance Paid at bottom
+                                total_amt = sum(r['amount'] for r in records)
+                                total_received = sum(r['received'] for r in records)
+                                total_pending = total_amt - total_received
+                                st.markdown(f"**Total Amount: ₹{total_amt:.2f}**")
+                                st.write(f"Advance Paid: :green[₹{total_received:.2f}] | Pending: :orange[₹{total_pending:.2f}]")
+
+                                ap1, ap2 = st.columns(2)
+                                with ap1:
+                                    adv_paid_str = st.text_input("Advance Paid (₹)", key=f"buy_adv_{name}", placeholder="₹")
+                                    try:
+                                        adv_paid = float(adv_paid_str) if adv_paid_str.strip() else 0.0
+                                    except ValueError:
+                                        adv_paid = 0.0
+                                with ap2:
+                                    st.write("")
+                                    st.write("")
+                                    if st.button("+ Add Advance", key=f"buy_adv_btn_{name}", type="primary"):
+                                        if adv_paid > 0:
+                                            count = update_trader_payment(name, "buyer", add_amount=adv_paid)
+                                            if count > 0:
+                                                st.success(f"Added ₹{adv_paid:.2f} advance payment")
+                                                fetch_sessions()
+                                                st.rerun()
 
     st.divider()
 
