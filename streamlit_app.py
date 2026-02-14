@@ -341,6 +341,7 @@ def get_trader_records(trader_name: str, trader_type: str):
                         "amount": s.get("totalAmount", 0),
                         "received": s.get("amountReceived", 0),
                         "pending": s.get("totalAmount", 0) - s.get("amountReceived", 0),
+                        "source_seller": s.get("sourceSeller", ""),
                     })
 
     return records
@@ -379,8 +380,8 @@ def get_aggregate_stats(sessions):
     total_bags_sold = 0
     total_paid = 0
     total_received = 0
-    all_sellers = {}  # name -> {bags, amount, paid, pending, sales_to (buyers)}
-    all_buyers = {}   # name -> {bags, amount, received, pending, bought_from (sellers)}
+    all_sellers = {}  # name -> {bags, amount, paid, pending, sold_to: {buyer: {bags, amount}}}
+    all_buyers = {}   # name -> {bags, amount, received, pending, bought_from: {seller: {bags, amount}}}
 
     # Track original display names (first occurrence wins)
     seller_display_names = {}
@@ -401,7 +402,7 @@ def get_aggregate_stats(sessions):
             total_paid += paid
 
             if name not in all_sellers:
-                all_sellers[name] = {"bags": 0, "amount": 0, "paid": 0, "sold_to": set()}
+                all_sellers[name] = {"bags": 0, "amount": 0, "paid": 0, "sold_to": {}}
             all_sellers[name]["bags"] += bags
             all_sellers[name]["amount"] += amt
             all_sellers[name]["paid"] += paid
@@ -421,30 +422,36 @@ def get_aggregate_stats(sessions):
             total_received += received
 
             if buyer_name not in all_buyers:
-                all_buyers[buyer_name] = {"bags": 0, "amount": 0, "received": 0, "bought_from": set()}
+                all_buyers[buyer_name] = {"bags": 0, "amount": 0, "received": 0, "bought_from": {}}
             all_buyers[buyer_name]["bags"] += bags
             all_buyers[buyer_name]["amount"] += amt
             all_buyers[buyer_name]["received"] += received
 
-            # Track relationships
+            # Track relationships with bags and amount
             if source_seller:
-                all_buyers[buyer_name]["bought_from"].add(source_seller)
                 source_key = source_seller.lower()
+                # Track in buyer: bought_from which seller
+                if source_seller not in all_buyers[buyer_name]["bought_from"]:
+                    all_buyers[buyer_name]["bought_from"][source_seller] = {"bags": 0, "amount": 0}
+                all_buyers[buyer_name]["bought_from"][source_seller]["bags"] += bags
+                all_buyers[buyer_name]["bought_from"][source_seller]["amount"] += amt
+                # Track in seller: sold_to which buyer
                 if source_key in all_sellers:
-                    all_sellers[source_key]["sold_to"].add(raw_buyer)
+                    if raw_buyer not in all_sellers[source_key]["sold_to"]:
+                        all_sellers[source_key]["sold_to"][raw_buyer] = {"bags": 0, "amount": 0}
+                    all_sellers[source_key]["sold_to"][raw_buyer]["bags"] += bags
+                    all_sellers[source_key]["sold_to"][raw_buyer]["amount"] += amt
 
-    # Add pending to each trader, convert sets to lists, and remap to display names
+    # Add pending to each trader and remap to display names
     display_sellers = {}
     for key in all_sellers:
         all_sellers[key]["pending"] = all_sellers[key]["amount"] - all_sellers[key]["paid"]
-        all_sellers[key]["sold_to"] = list(all_sellers[key]["sold_to"])
         display_name = seller_display_names.get(key, key)
         display_sellers[display_name] = all_sellers[key]
 
     display_buyers = {}
     for key in all_buyers:
         all_buyers[key]["pending"] = all_buyers[key]["amount"] - all_buyers[key]["received"]
-        all_buyers[key]["bought_from"] = list(all_buyers[key]["bought_from"])
         display_name = buyer_display_names.get(key, key)
         display_buyers[display_name] = all_buyers[key]
 
@@ -748,6 +755,20 @@ def main_app():
                                 remaining = 0
                         st.rerun()
 
+            with st.expander("✏️ Edit Total Amount"):
+                for pidx, prec in enumerate(purchases):
+                    st.caption(f"**{prec['traderName']}** ({prec.get('date', '')}) — Current: ₹{prec['totalAmount']:.2f}")
+                    new_total_str = st.text_input("New Total (₹)", key=f"p_edit_total_{pidx}", placeholder=f"{prec['totalAmount']:.2f}")
+                    if st.button("Update", key=f"p_edit_total_btn_{pidx}", type="primary"):
+                        try:
+                            new_total = float(new_total_str)
+                            if new_total >= 0:
+                                st.session_state.purchases[pidx]["totalAmount"] = round(new_total, 2)
+                                st.rerun()
+                        except ValueError:
+                            st.error("Invalid amount")
+                    st.divider()
+
     # ── SALE TAB ─────────────────────────────────────────────────────
     with tab_sale:
         # Get current session's seller names for linking
@@ -950,6 +971,20 @@ def main_app():
                                 remaining = 0
                         st.rerun()
 
+            with st.expander("✏️ Edit Total Amount"):
+                for sidx, srec in enumerate(sales):
+                    st.caption(f"**{srec['traderName']}** ({srec.get('date', '')}) — Current: ₹{srec['totalAmount']:.2f}")
+                    new_total_str = st.text_input("New Total (₹)", key=f"s_edit_total_{sidx}", placeholder=f"{srec['totalAmount']:.2f}")
+                    if st.button("Update", key=f"s_edit_total_btn_{sidx}", type="primary"):
+                        try:
+                            new_total = float(new_total_str)
+                            if new_total >= 0:
+                                st.session_state.sales[sidx]["totalAmount"] = round(new_total, 2)
+                                st.rerun()
+                        except ValueError:
+                            st.error("Invalid amount")
+                    st.divider()
+
     # Reset button
     if purchases or sales:
         st.divider()
@@ -1049,7 +1084,11 @@ def main_app():
                             st.markdown(f"**{name}**")
                             st.write(f"Bags: {data['bags']} | Total: ₹{data['amount']:.2f}")
                             if data.get('sold_to'):
-                                st.caption(f"Sold to: {', '.join(data['sold_to'])}")
+                                sold_details = " | ".join(
+                                    f"{buyer}: {info['bags']} bags, ₹{info['amount']:.2f}"
+                                    for buyer, info in data['sold_to'].items()
+                                )
+                                st.caption(f"Sold to → {sold_details}")
                         with c2:
                             st.write(f"Advance Paid: :green[₹{data['paid']:.2f}]")
                             if data['pending'] > 0:
@@ -1181,7 +1220,11 @@ def main_app():
                             st.markdown(f"**{name}**")
                             st.write(f"Bags: {data['bags']} | Total: ₹{data['amount']:.2f}")
                             if data.get('bought_from'):
-                                st.caption(f"Bought from: {', '.join(data['bought_from'])}")
+                                bought_details = " | ".join(
+                                    f"{seller}: {info['bags']} bags, ₹{info['amount']:.2f}"
+                                    for seller, info in data['bought_from'].items()
+                                )
+                                st.caption(f"Bought from → {bought_details}")
                         with c2:
                             st.write(f"Advance Paid: :green[₹{data['received']:.2f}]")
                             if data['pending'] > 0:
@@ -1194,7 +1237,10 @@ def main_app():
                             records = get_trader_records(name, "buyer")
                             if records:
                                 for i, rec in enumerate(records):
-                                    st.markdown(f"**{rec['session_name']}**")
+                                    header = f"**{rec['session_name']}**"
+                                    if rec.get('source_seller'):
+                                        header += f" &nbsp; _(from: {rec['source_seller']})_"
+                                    st.markdown(header)
                                     st.caption(f"Current: Date: {rec['date']} | Bags: {rec['bags']} | Amount: ₹{rec['amount']:.2f}")
 
                                     ec1, ec2, ec3 = st.columns(3)
