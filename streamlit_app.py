@@ -764,6 +764,7 @@ def main_app():
                             new_total = float(new_total_str)
                             if new_total >= 0:
                                 st.session_state.purchases[pidx]["totalAmount"] = round(new_total, 2)
+                                st.session_state.purchases[pidx]["amountPaid"] = round(new_total, 2)
                                 st.rerun()
                         except ValueError:
                             st.error("Invalid amount")
@@ -980,6 +981,7 @@ def main_app():
                             new_total = float(new_total_str)
                             if new_total >= 0:
                                 st.session_state.sales[sidx]["totalAmount"] = round(new_total, 2)
+                                st.session_state.sales[sidx]["amountReceived"] = round(new_total, 2)
                                 st.rerun()
                         except ValueError:
                             st.error("Invalid amount")
@@ -1187,6 +1189,7 @@ def main_app():
                                                 new_total = float(new_total_str)
                                                 if new_total >= 0:
                                                     if update_specific_record(rec['session_id'], rec['record_id'], "seller", "totalAmount", round(new_total, 2)):
+                                                        update_specific_record(rec['session_id'], rec['record_id'], "seller", "amountPaid", round(new_total, 2))
                                                         st.success(f"Updated to ₹{new_total:.2f}")
                                                         fetch_sessions()
                                                         st.rerun()
@@ -1345,6 +1348,7 @@ def main_app():
                                                 new_total = float(new_total_str)
                                                 if new_total >= 0:
                                                     if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "totalAmount", round(new_total, 2)):
+                                                        update_specific_record(rec['session_id'], rec['record_id'], "buyer", "amountReceived", round(new_total, 2))
                                                         st.success(f"Updated to ₹{new_total:.2f}")
                                                         fetch_sessions()
                                                         st.rerun()
