@@ -1178,6 +1178,22 @@ def main_app():
                                                 fetch_sessions()
                                                 st.rerun()
 
+                                with st.expander("✏️ Edit Total Amount"):
+                                    for ri, rec in enumerate(records):
+                                        st.caption(f"**{rec['session_name']}** — {rec['date']} | Bags: {rec['bags']} | Current: ₹{rec['amount']:.2f}")
+                                        new_total_str = st.text_input("New Total (₹)", key=f"sel_edit_total_{name}_{ri}", placeholder=f"{rec['amount']:.2f}")
+                                        if st.button("Update", key=f"sel_edit_total_btn_{name}_{ri}", type="primary"):
+                                            try:
+                                                new_total = float(new_total_str)
+                                                if new_total >= 0:
+                                                    if update_specific_record(rec['session_id'], rec['record_id'], "seller", "totalAmount", round(new_total, 2)):
+                                                        st.success(f"Updated to ₹{new_total:.2f}")
+                                                        fetch_sessions()
+                                                        st.rerun()
+                                            except ValueError:
+                                                st.error("Invalid amount")
+                                        st.divider()
+
     # ── BUYERS TAB ────────────────────────────────────────────────────
     with buyer_tab:
         buyers = stats['buyers']
@@ -1316,6 +1332,25 @@ def main_app():
                                                 st.success(f"Advance paid set to ₹{buy_edit_val:.2f}")
                                                 fetch_sessions()
                                                 st.rerun()
+
+                                with st.expander("✏️ Edit Total Amount"):
+                                    for ri, rec in enumerate(records):
+                                        header = f"**{rec['session_name']}** — {rec['date']} | Bags: {rec['bags']} | Current: ₹{rec['amount']:.2f}"
+                                        if rec.get('source_seller'):
+                                            header += f" _(from: {rec['source_seller']})_"
+                                        st.caption(header)
+                                        new_total_str = st.text_input("New Total (₹)", key=f"buy_edit_total_{name}_{ri}", placeholder=f"{rec['amount']:.2f}")
+                                        if st.button("Update", key=f"buy_edit_total_btn_{name}_{ri}", type="primary"):
+                                            try:
+                                                new_total = float(new_total_str)
+                                                if new_total >= 0:
+                                                    if update_specific_record(rec['session_id'], rec['record_id'], "buyer", "totalAmount", round(new_total, 2)):
+                                                        st.success(f"Updated to ₹{new_total:.2f}")
+                                                        fetch_sessions()
+                                                        st.rerun()
+                                            except ValueError:
+                                                st.error("Invalid amount")
+                                        st.divider()
 
     st.divider()
 
